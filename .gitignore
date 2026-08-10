@@ -1,0 +1,22 @@
+# --- Data: NOT redistributed here (see README "Data & licensing") ---
+# IMD gridded rainfall (© India Meteorological Department)
+*.nc
+rainfall_parquet/
+# GeoNames dumps (CC BY 4.0 - download yourself)
+IN.txt
+IN.zip
+admin1.txt
+# Derived lookups + any per-year Parquet built from IMD data
+*.parquet
+city_cell_mapping.parquet
+cell_lookup.parquet
+# Derived charts (aggregates of IMD data)
+*.png
+
+# --- Environment / scratch ---
+.venv/
+__pycache__/
+page.html
+*_tmp_*.nc
+test_*.nc
+scrape.log
