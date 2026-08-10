@@ -95,3 +95,17 @@ schema every year back to 1901.
 `.gitignore` keeps all data out: `*.nc`, `rainfall_parquet/`, the GeoNames
 dumps, and the two derived Parquet lookups. Someone cloning the repo runs the
 three scripts and rebuilds everything from the original sources.
+
+<!-- claude-session:2a5dc498-559e-4ac6-aca2-41eb1ab394d2:start -->
+## 2026-08-10 09:22 IST | Claude session `2a5dc498-559`
+
+### User prompts
+> help explore @RF25_ind2025_rfp25.nc . and store it in an easy and smaller format (parquet?).
+> yes do a quick sanity check. after that let's scrape for historical data.
+> <task-notification> <task-id>b7ebmbq9x</task-id> <tool-use-id>toolu_01BGKZNcJHg6mp8SJs6NwWM6</tool-use-id> <output-file>/private/tmp/claude-501/-Users-Karthik-Documents-work-data-work-weather/2a5dc498-559e-4ac6-aca2-4...
+
+### Work done
+- Everything's in place and git is clean. Saving a memory so a fresh chat picks up where this left off:
+- Yes - safe to clear. Everything's documented in three places: **1. In the repo (pushed):** - `README.md` — setup, run steps, grid facts, licensing, caveats - `dev-log.md` — full process, all your prompts, decisions, p...
+
+<!-- claude-session:2a5dc498-559e-4ac6-aca2-41eb1ab394d2:end -->
