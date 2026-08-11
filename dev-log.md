@@ -109,3 +109,17 @@ three scripts and rebuilds everything from the original sources.
 - Yes - safe to clear. Everything's documented in three places: **1. In the repo (pushed):** - `README.md` — setup, run steps, grid facts, licensing, caveats - `dev-log.md` — full process, all your prompts, decisions, p...
 
 <!-- claude-session:2a5dc498-559e-4ac6-aca2-41eb1ab394d2:end -->
+
+<!-- claude-session:fa9a2829-c40e-48be-9726-73efd1d217b5:start -->
+## 2026-08-11 10:21 IST | Claude session `fa9a2829-c40`
+
+### User prompts
+> i'd started a project recently to edit my website. now i don['t know which folder it was in. find it and navigate to that folder so we c an revive it
+> ok so basically what are the changes i'd requested? i need to make it a good lead gen thing. so that people c an see me there and wnat to hire me for consulting or workshops.
+> don't add any years on any projects. and no need to include sabre etc. also. and fix the typo. and show me hte content here before you push.
+
+### Work done
+- Using skills: karthik-writing-style. Reading your voice files first.
+- The bucket headers were the AI tell - "AI inside real business workflows / Pricing and revenue models" is exactly the capability-matrix voice to kill. In your voice, coherence comes from concrete, understated lines, n...
+
+<!-- claude-session:fa9a2829-c40e-48be-9726-73efd1d217b5:end -->
