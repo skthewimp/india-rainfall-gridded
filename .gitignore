@@ -2,6 +2,10 @@
 # IMD gridded rainfall (© India Meteorological Department)
 *.nc
 rainfall_parquet/
+# External hydrography/boundary downloads and local Kaveri derivatives
+sources/
+data/kaveri_*
+outputs/
 # GeoNames dumps (CC BY 4.0 - download yourself)
 IN.txt
 IN.zip

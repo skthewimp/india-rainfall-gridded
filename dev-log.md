@@ -152,3 +152,17 @@ three scripts and rebuilds everything from the original sources.
 - Touched files: `.posit/`, `explore_rainfall.Rmd`
 
 <!-- claude-session:6f6d5a64-ba41-4b58-91ba-dbe1d3800ced:end -->
+
+## 2026-08-11 14:08 IST | Kaveri catchment rainfall
+
+### User prompts
+> i want to look at the total rainfall in the Kaveri catchment year each year, maybe even monthly. and see trends over time and stuff. first start by getting a map with the kaveri catchment region. then map it to the cells here. and then look at aggregate rainfall. now this needs to include tributaries as well. and needs to be checkpointed along the course of the river. "upstream of KRS", "within karnataka", any other dams, etc.
+
+> ok great. write a blogpost about this. and push all this to github. i'll examine soon.
+
+### Work done
+- Combined the CWC/NWIC whole-basin boundary with HydroBASINS level-12 topology and HydroRIVERS tributaries.
+- Built fractional IMD cell weights for the whole basin, Karnataka, and eight dam/gauge catchments; validated coverage and reported catchment areas.
+- Aggregated 1901-2025 daily rainfall into monthly and annual area-weighted depth and volume using DuckDB.
+- Kept trend claims to 1951-2024 after confirming a pre-1951 Western Ghats discontinuity, especially in Kabini.
+- Added `kaveri_rainfall.Rmd`, three reproducible scripts, README instructions, and a public-facing draft in `blog-post.md`.
