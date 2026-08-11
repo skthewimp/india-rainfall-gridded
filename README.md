@@ -50,14 +50,14 @@ R side (lookup table + charts) needs `arrow`, `dplyr`, `lubridate`, `ggplot2`.
 # 1. Download all years 1901–2025 and convert to rainfall_parquet/
 #    Resumable: re-running skips years already converted. Deletes each .nc
 #    after converting. ~30–45 min, ~3 GB downloaded, polite 2 s delay.
-.venv/bin/python scrape.py
+.venv/bin/python scripts/scrape.py
 
 # 2. Map Indian populated places (GeoNames) to their grid cell.
 #    Needs IN.txt + admin1.txt (see below).
-.venv/bin/python citymap.py
+.venv/bin/python scripts/citymap.py
 
 # 3. Label each cell with its largest town.
-Rscript build_cell_lookup.R
+Rscript scripts/build_cell_lookup.R
 ```
 
 For the place mapping, grab the GeoNames dumps first:
@@ -67,8 +67,8 @@ curl -sL https://download.geonames.org/export/dump/IN.zip -o IN.zip && unzip IN.
 curl -sL https://download.geonames.org/export/dump/admin1CodesASCII.txt -o admin1.txt
 ```
 
-`convert.py` and `sanity.R` are standalone examples: convert a single NetCDF
-file, and plot all-India daily mean rainfall for one year.
+Pipeline scripts live in `scripts/`; run them from the repo root (paths are
+root-relative).
 
 ## Using the data
 
