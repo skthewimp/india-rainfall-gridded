@@ -138,3 +138,4 @@ three scripts and rebuilds everything from the original sources.
 - Touched files: `.posit/`, `explore_rainfall.Rmd`
 
 <!-- claude-session:04fc5bbe-c066-42af-ba12-12f8da480f63:end -->
+
