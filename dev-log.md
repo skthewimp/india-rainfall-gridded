@@ -123,3 +123,18 @@ three scripts and rebuilds everything from the original sources.
 - The bucket headers were the AI tell - "AI inside real business workflows / Pricing and revenue models" is exactly the capability-matrix voice to kill. In your voice, coherence comes from concrete, understated lines, n...
 
 <!-- claude-session:fa9a2829-c40e-48be-9726-73efd1d217b5:end -->
+
+<!-- claude-session:04fc5bbe-c066-42af-ba12-12f8da480f63:start -->
+## 2026-08-11 11:05 IST | Claude session `04fc5bbe-c06`
+
+### User prompts
+> clean up this folder. remove the old raw data files (only keep the parquets). keep only the necessary (for future downloads) pieces of code, and put them in their own folder.
+> what is the RF*parquet doing here? is it necessraey?
+> now create an R note book (.Rmd) to explore and visualise the data in my style. keep it concise.
+
+### Work done
+- Let me smoke-test the R actually runs (arrow paths, town filter, aggregations).
+- All chunks run. Verified against real data: 226M rows, 45,656 daily means (125 yrs), Bengaluru cell resolves to (13, 77.5), 2025 map = 4,964 cells, 0-7996mm. `explore_rainfall.Rmd` — 8 chunks, weather-scratchpad textu...
+- Touched files: `.posit/`, `explore_rainfall.Rmd`
+
+<!-- claude-session:04fc5bbe-c066-42af-ba12-12f8da480f63:end -->
