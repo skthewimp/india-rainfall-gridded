@@ -1,0 +1,370 @@
+---
+title: "Kaveri catchment rainfall"
+output: html_notebook
+---
+
+```{r}
+require(tidyverse)
+require(arrow)
+require(lubridate)
+require(trend)
+```
+
+What exactly are we measuring?
+
+- A year means a calendar year. We can add the June-May water year later.
+- "Rainfall in the catchment" means area-weighted rainfall depth in mm. It is
+  also converted to km3 falling over that area. It is not reservoir inflow.
+- The CWC boundary defines the whole basin. HydroBASINS topology defines land
+  upstream of each dam or gauge, so tributaries are included automatically.
+- The main trend window is 1951-2024. The early IMD grid has a large pre-1951
+  break in the Kabini/Western Ghats cells; 2025 is provisional.
+
+First look at the geography and the cells.
+
+```{r, echo=FALSE, out.width="100%"}
+knitr::include_graphics("outputs/kaveri_catchment_map.png")
+knitr::include_graphics("outputs/kaveri_imd_cells_map.png")
+knitr::include_graphics("outputs/kaveri_checkpoint_zones.png")
+```
+
+```{r}
+zone_summary <- read_csv(
+  "data/kaveri_zone_summary.csv",
+  show_col_types = FALSE
+)
+
+monthly <- read_parquet("data/kaveri_rainfall_monthly.parquet")
+annual <- read_parquet("data/kaveri_rainfall_annual.parquet")
+
+zone_summary %>%
+  select(zone, zone_area_km2, cells, grid_coverage_pct)
+```
+
+The whole CWC basin uses 153 IMD cells and has 99.4% grid-area coverage. All
+checkpoint catchments have effectively complete coverage. Every annual row has
+12 months and either 365 or 366 observed days.
+
+## Has rainfall shifted since 1951?
+
+```{r}
+zone_order <- c(
+  "whole_basin",
+  "within_karnataka",
+  "upstream_krs",
+  "upstream_harangi",
+  "upstream_hemavathi",
+  "upstream_kabini",
+  "upstream_biligundlu",
+  "upstream_mettur",
+  "upstream_bhavanisagar",
+  "upstream_amaravathi"
+)
+
+zone_labels <- c(
+  whole_basin = "Whole basin",
+  within_karnataka = "Within Karnataka",
+  upstream_krs = "Upstream of KRS",
+  upstream_harangi = "Upstream of Harangi",
+  upstream_hemavathi = "Upstream of Hemavathi",
+  upstream_kabini = "Upstream of Kabini",
+  upstream_biligundlu = "Upstream of Biligundlu",
+  upstream_mettur = "Upstream of Mettur",
+  upstream_bhavanisagar = "Upstream of Bhavanisagar",
+  upstream_amaravathi = "Upstream of Amaravathi"
+)
+
+trend_stats <- annual %>%
+  filter(year >= 1951, year <= 2024) %>%
+  group_by(zone_id, zone) %>%
+  group_modify(function(d, key) {
+    sen <- trend::sens.slope(d$rainfall_mm)
+    mk <- trend::mk.test(d$rainfall_mm)
+
+    tibble(
+      mean_mm = mean(d$rainfall_mm),
+      sd_mm = sd(d$rainfall_mm),
+      cv = sd_mm / mean_mm,
+      sen_mm_decade = unname(sen$estimates) * 10,
+      mann_kendall_p = mk$p.value
+    )
+  }) %>%
+  ungroup()
+
+period_change <- annual %>%
+  filter(year %in% c(1951:1980, 1995:2024)) %>%
+  mutate(period = if_else(year <= 1980, "1951-1980", "1995-2024")) %>%
+  summarise(period_mean_mm = mean(rainfall_mm), .by = c(zone_id, period)) %>%
+  pivot_wider(names_from = period, values_from = period_mean_mm) %>%
+  mutate(
+    change_mm = `1995-2024` - `1951-1980`,
+    change_pct = 100 * change_mm / `1951-1980`
+  )
+
+trend_summary <- trend_stats %>%
+  left_join(period_change, by = "zone_id") %>%
+  mutate(
+    zone_short = unname(zone_labels[zone_id]),
+    zone_id = factor(zone_id, levels = zone_order)
+  ) %>%
+  arrange(zone_id)
+
+trend_summary %>%
+  transmute(
+    zone = zone_short,
+    mean_mm = round(mean_mm),
+    sen_mm_decade = round(sen_mm_decade, 1),
+    mann_kendall_p = round(mann_kendall_p, 3),
+    recent_vs_early_pct = round(change_pct, 1)
+  )
+```
+
+```{r}
+write_csv(
+  trend_summary %>%
+    select(
+      zone_id, zone_short, mean_mm, sd_mm, cv,
+      sen_mm_decade, mann_kendall_p,
+      `1951-1980`, `1995-2024`, change_mm, change_pct
+    ),
+  "data/kaveri_trend_summary.csv"
+)
+```
+
+The whole basin's recent 30-year average is 5% above 1951-80. That average
+hides a split: KRS and Karnataka are about 12% higher, while Bhavanisagar is
+13% lower and Kabini 7% lower.
+
+```{r, fig.width=10, fig.height=9}
+annual_plot <- annual %>%
+  filter(year >= 1951) %>%
+  mutate(
+    zone_short = unname(zone_labels[zone_id]),
+    zone_id = factor(zone_id, levels = zone_order)
+  ) %>%
+  left_join(
+    trend_summary %>%
+      transmute(
+        zone_id,
+        facet_label = paste0(
+          zone_short,
+          " · ",
+          scales::number(change_pct, accuracy = 0.1, scale_cut = NULL, prefix = if_else(change_pct > 0, "+", "")),
+          "% recent vs early"
+        )
+      ),
+    by = "zone_id"
+  ) %>%
+  arrange(zone_id, year) %>%
+  group_by(zone_id, facet_label) %>%
+  mutate(
+    rolling_11yr = as.numeric(
+      stats::filter(rainfall_mm, rep(1 / 11, 11), sides = 1)
+    )
+  ) %>%
+  ungroup() %>%
+  mutate(
+    facet_label = factor(
+      facet_label,
+      levels = trend_summary %>%
+        transmute(
+          label = paste0(
+            zone_short,
+            " · ",
+            scales::number(change_pct, accuracy = 0.1, scale_cut = NULL, prefix = if_else(change_pct > 0, "+", "")),
+            "% recent vs early"
+          )
+        ) %>%
+        pull(label)
+    )
+  )
+
+annual_plot %>%
+  filter(year <= 2024) %>%
+  ggplot(aes(year, rainfall_mm)) +
+  geom_line(colour = "grey72", linewidth = 0.35) +
+  geom_point(colour = "grey48", size = 0.65) +
+  geom_line(
+    aes(y = rolling_11yr),
+    colour = "#176d6e",
+    linewidth = 0.9,
+    na.rm = TRUE
+  ) +
+  geom_point(
+    data = annual_plot %>% filter(year == 2025),
+    shape = 21,
+    fill = "white",
+    colour = "#a65425",
+    size = 2,
+    stroke = 0.8
+  ) +
+  facet_wrap(vars(facet_label), ncol = 2, scales = "free_y") +
+  scale_x_continuous(breaks = seq(1960, 2020, 20)) +
+  scale_y_continuous(labels = scales::label_comma()) +
+  labs(
+    title = "Kaveri rainfall has edged up, but its tributaries diverge",
+    subtitle = "Annual totals and trailing 11-year means, 1951-2024. Panel scales vary; open point is provisional 2025.",
+    x = NULL,
+    y = "annual rainfall (mm)",
+    caption = "Recent vs early compares 1995-2024 with 1951-1980. Rainfall is area-weighted over each catchment; it is not river inflow. Source: IMD 0.25° daily grid."
+  ) +
+  theme_minimal(base_size = 10) +
+  theme(
+    panel.grid.minor = element_blank(),
+    panel.grid.major.x = element_blank(),
+    strip.text = element_text(face = "bold", hjust = 0, size = 9),
+    plot.title = element_text(face = "bold", size = 15),
+    plot.subtitle = element_text(colour = "grey35", margin = margin(b = 8)),
+    plot.caption = element_text(colour = "grey45", hjust = 0, size = 7.5),
+    plot.margin = margin(12, 18, 12, 12)
+  ) -> annual_chart
+
+ggsave(
+  "outputs/kaveri_annual_rainfall_trends.png",
+  annual_chart,
+  width = 10,
+  height = 9,
+  dpi = 180,
+  bg = "white"
+)
+```
+
+The same result is easier to compare as one ranked change chart.
+
+```{r, fig.width=9, fig.height=6}
+trend_summary %>%
+  mutate(
+    zone_short = fct_reorder(zone_short, change_pct),
+    direction = if_else(change_pct >= 0, "higher", "lower"),
+    label = paste0(
+      if_else(change_pct > 0, "+", ""),
+      round(change_pct, 1),
+      "%"
+    )
+  ) %>%
+  ggplot(aes(change_pct, zone_short, fill = direction)) +
+  geom_vline(xintercept = 0, colour = "grey65", linewidth = 0.4) +
+  geom_col(width = 0.62) +
+  geom_text(
+    aes(
+      label = label,
+      hjust = if_else(change_pct >= 0, -0.15, 1.15)
+    ),
+    colour = "grey15",
+    size = 3.2
+  ) +
+  scale_fill_manual(values = c(higher = "#176d6e", lower = "#bd7b55"), guide = "none") +
+  scale_x_continuous(
+    labels = scales::label_percent(scale = 1),
+    limits = c(-16, 17),
+    breaks = seq(-15, 15, 5)
+  ) +
+  labs(
+    title = "Recent rainfall is higher around KRS, lower in Bhavani and Kabini",
+    subtitle = "Difference between the 1995-2024 and 1951-1980 annual averages",
+    x = NULL,
+    y = NULL,
+    caption = "Descriptive period comparison, not a causal or runoff estimate. Source: IMD 0.25° daily grid; area-weighted to CWC/HydroBASINS catchments."
+  ) +
+  theme_minimal(base_size = 11) +
+  theme(
+    panel.grid.major.y = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.text.y = element_text(colour = "grey20"),
+    plot.title = element_text(face = "bold", size = 15),
+    plot.subtitle = element_text(colour = "grey35", margin = margin(b = 8)),
+    plot.caption = element_text(colour = "grey45", hjust = 0, size = 7.5),
+    plot.margin = margin(12, 28, 12, 12)
+  ) -> change_chart
+
+ggsave(
+  "outputs/kaveri_recent_vs_early_rainfall.png",
+  change_chart,
+  width = 9,
+  height = 6,
+  dpi = 180,
+  bg = "white"
+)
+```
+
+## When does each part get its rain?
+
+```{r}
+monthly_climatology <- monthly %>%
+  filter(year >= 1951, year <= 2024) %>%
+  summarise(
+    mean_mm = mean(rainfall_mm),
+    median_mm = median(rainfall_mm),
+    p25_mm = quantile(rainfall_mm, 0.25),
+    p75_mm = quantile(rainfall_mm, 0.75),
+    .by = c(zone_id, zone, month)
+  ) %>%
+  group_by(zone_id) %>%
+  mutate(
+    annual_mean_mm = sum(mean_mm),
+    peak = mean_mm == max(mean_mm),
+    zone_short = unname(zone_labels[zone_id])
+  ) %>%
+  ungroup() %>%
+  mutate(
+    zone_id = factor(zone_id, levels = zone_order),
+    month_label = factor(month.abb[month], levels = month.abb),
+    facet_label = paste0(zone_short, " · ", round(annual_mean_mm), " mm/year")
+  )
+
+monthly_climatology %>%
+  filter(peak) %>%
+  transmute(zone = zone_short, peak_month = month.abb[month], mean_mm = round(mean_mm))
+```
+
+```{r, fig.width=10, fig.height=9}
+monthly_climatology %>%
+  mutate(
+    facet_label = factor(
+      facet_label,
+      levels = monthly_climatology %>%
+        distinct(zone_id, facet_label) %>%
+        arrange(zone_id) %>%
+        pull(facet_label)
+    )
+  ) %>%
+  ggplot(aes(month_label, mean_mm, fill = peak)) +
+  geom_col(width = 0.75) +
+  facet_wrap(vars(facet_label), ncol = 2, scales = "free_y") +
+  scale_fill_manual(values = c(`FALSE` = "grey78", `TRUE` = "#176d6e"), guide = "none") +
+  scale_x_discrete(breaks = month.abb[c(1, 4, 7, 10)]) +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.12))) +
+  labs(
+    title = "Headwater catchments peak in July; the whole basin peaks in October",
+    subtitle = "Average monthly rainfall, 1951-2024. The peak month is highlighted; panel scales vary.",
+    x = NULL,
+    y = "mean monthly rainfall (mm)",
+    caption = "Source: IMD 0.25° daily grid; area-weighted to CWC/HydroBASINS catchments."
+  ) +
+  theme_minimal(base_size = 10) +
+  theme(
+    panel.grid.minor = element_blank(),
+    panel.grid.major.x = element_blank(),
+    strip.text = element_text(face = "bold", hjust = 0, size = 9),
+    plot.title = element_text(face = "bold", size = 15),
+    plot.subtitle = element_text(colour = "grey35", margin = margin(b = 8)),
+    plot.caption = element_text(colour = "grey45", hjust = 0, size = 7.5),
+    plot.margin = margin(12, 18, 12, 12)
+  ) -> monthly_chart
+
+ggsave(
+  "outputs/kaveri_monthly_rainfall_climatology.png",
+  monthly_chart,
+  width = 10,
+  height = 9,
+  dpi = 180,
+  bg = "white"
+)
+```
+
+The rainfall timing changes materially downstream. Harangi, Hemavathi and
+Kabini get roughly two-thirds of annual rain in June-September. For the whole
+basin, June-September contributes 45% and October-December 37%.
+
+What this still does not answer: how much reaches a reservoir. That needs
+runoff, evapotranspiration, soil storage, withdrawals, and reservoir operations.

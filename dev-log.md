@@ -139,3 +139,30 @@ three scripts and rebuilds everything from the original sources.
 
 <!-- claude-session:04fc5bbe-c066-42af-ba12-12f8da480f63:end -->
 
+<!-- claude-session:6f6d5a64-ba41-4b58-91ba-dbe1d3800ced:start -->
+## 2026-08-11 13:11 IST | Claude session `6f6d5a64-ba4`
+
+### User prompts
+> the pune data looks highly suspect. can you verify there is no mistake? [Image #1]
+> no look at the early period. till 1950 or so.
+
+### Work done
+- Found it. There's a **step-break around 1950**, not a smooth climate signal. Pune decade means: **1900s-1940s ≈ 1,900-2,900 mm**, then **1950s onward crashes to ~700-900 mm**. A ~2.5x drop between the 1940s and 1950s...
+- Confirmed - it's an **artifact, not climate, and it's specific to the Pune-Ghats cell.** Pre/post-1950 ratios: - **Pune (18.5,73.75): 2.08** ← the break - Mumbai 0.87, Delhi 0.93, Jaipur 0.91, Bengaluru 0.97 — all fla...
+- Touched files: `.posit/`, `explore_rainfall.Rmd`
+
+<!-- claude-session:6f6d5a64-ba41-4b58-91ba-dbe1d3800ced:end -->
+
+## 2026-08-11 14:08 IST | Kaveri catchment rainfall
+
+### User prompts
+> i want to look at the total rainfall in the Kaveri catchment year each year, maybe even monthly. and see trends over time and stuff. first start by getting a map with the kaveri catchment region. then map it to the cells here. and then look at aggregate rainfall. now this needs to include tributaries as well. and needs to be checkpointed along the course of the river. "upstream of KRS", "within karnataka", any other dams, etc.
+
+> ok great. write a blogpost about this. and push all this to github. i'll examine soon.
+
+### Work done
+- Combined the CWC/NWIC whole-basin boundary with HydroBASINS level-12 topology and HydroRIVERS tributaries.
+- Built fractional IMD cell weights for the whole basin, Karnataka, and eight dam/gauge catchments; validated coverage and reported catchment areas.
+- Aggregated 1901-2025 daily rainfall into monthly and annual area-weighted depth and volume using DuckDB.
+- Kept trend claims to 1951-2024 after confirming a pre-1951 Western Ghats discontinuity, especially in Kabini.
+- Added `kaveri_rainfall.Rmd`, three reproducible scripts, README instructions, and a public-facing draft in `blog-post.md`.

@@ -43,6 +43,8 @@ uv pip install --python .venv/bin/python xarray netCDF4 pandas pyarrow
 ```
 
 R side (lookup table + charts) needs `arrow`, `dplyr`, `lubridate`, `ggplot2`.
+The Kaveri analysis additionally uses `sf`, `duckdb`, `DBI`, `trend`, and
+`ggrepel`.
 
 ## Run it
 
@@ -86,6 +88,31 @@ open_dataset("rainfall_parquet") |>
 
 `open_dataset()` is lazy — filters push down to the Parquet files, so pulling
 one cell out of 226M rows is quick.
+
+## Kaveri catchment analysis
+
+`kaveri_rainfall.Rmd` maps the Kaveri basin to the IMD grid, then compares
+area-weighted monthly and annual rainfall for the whole basin, the Karnataka
+portion, and catchments upstream of major dams and gauges. Tributaries are
+included through HydroBASINS upstream topology rather than a buffer around the
+main river.
+
+Download the external CWC/NWIC, HydroBASINS, HydroRIVERS, and geoBoundaries
+files, then build the geography and rainfall aggregates:
+
+```bash
+bash scripts/fetch_kaveri_geography.sh
+Rscript scripts/build_kaveri_geography.R
+Rscript scripts/aggregate_kaveri_rainfall.R
+```
+
+The build script creates fractional grid-cell weights for the whole basin and
+for Harangi, Hemavathi, KRS, Kabini, Biligundlu, Mettur, Bhavanisagar, and
+Amaravathi. The second scans the year-partitioned rainfall Parquet with DuckDB
+and writes compact monthly and annual aggregates under `data/`.
+
+The external geometries, derived rainfall tables, and rendered charts remain
+untracked. See [`blog-post.md`](blog-post.md) for the findings and caveats.
 
 ## Data & licensing
 
