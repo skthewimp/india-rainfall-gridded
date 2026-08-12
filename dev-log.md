@@ -149,9 +149,11 @@ three scripts and rebuilds everything from the original sources.
 ### Work done
 - Found it. There's a **step-break around 1950**, not a smooth climate signal. Pune decade means: **1900s-1940s ≈ 1,900-2,900 mm**, then **1950s onward crashes to ~700-900 mm**. A ~2.5x drop between the 1940s and 1950s...
 - Confirmed - it's an **artifact, not climate, and it's specific to the Pune-Ghats cell.** Pre/post-1950 ratios: - **Pune (18.5,73.75): 2.08** ← the break - Mumbai 0.87, Delhi 0.93, Jaipur 0.91, Bengaluru 0.97 — all fla...
-- Touched files: `.posit/`, `explore_rainfall.Rmd`
+- Touched files: `kaveri_rainfall.Rmd`, `.posit/`, `explore_rainfall.Rmd`
+- kaveri_rainfall.Rmd | 371 +++++++++-------------------------------------------
 
 <!-- claude-session:6f6d5a64-ba41-4b58-91ba-dbe1d3800ced:end -->
+
 
 
 ## 2026-08-11 14:08 IST | Kaveri catchment rainfall
