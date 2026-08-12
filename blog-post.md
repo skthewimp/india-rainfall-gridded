@@ -37,6 +37,8 @@ The output is an area-weighted rainfall depth in millimetres. I also convert tha
 
 The word *gross* is doing useful work there. This is rain, not water arriving at a dam.
 
+For comparisons over time, I use rainfall depth because it lets differently sized catchments sit on the same scale. For cumulative checkpoints, I use volume. On that measure the nesting works as it should: average annual gross rainfall rises from about 11.9 cubic kilometres upstream of KRS to 35.8 at Biligundlu, 40.5 at Mettur and 81.7 across the whole basin. Kabini and Hemavathi are tributary branches, not later points on that same sequence.
+
 ## The basin has become a little wetter. Its tributaries have not moved together.
 
 I compared the average for 1995-2024 with 1951-1980. I prefer this to pretending that one straight trend line captures everything happening over 74 noisy monsoons.

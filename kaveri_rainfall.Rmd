@@ -8,6 +8,7 @@ require(tidyverse)
 require(arrow)
 require(lubridate)
 require(trend)
+require(ggrepel)
 ```
 
 What exactly are we measuring?
@@ -290,56 +291,184 @@ ggsave(
 ## When does each part get its rain?
 
 ```{r}
-monthly_climatology <- monthly %>%
+monthly_volume <- monthly %>%
   filter(year >= 1951, year <= 2024) %>%
   summarise(
-    mean_mm = mean(rainfall_mm),
-    median_mm = median(rainfall_mm),
-    p25_mm = quantile(rainfall_mm, 0.25),
-    p75_mm = quantile(rainfall_mm, 0.75),
+    mean_km3 = mean(rainfall_km3),
     .by = c(zone_id, zone, month)
   ) %>%
   group_by(zone_id) %>%
   mutate(
-    annual_mean_mm = sum(mean_mm),
-    peak = mean_mm == max(mean_mm),
+    annual_mean_km3 = sum(mean_km3),
+    peak = mean_km3 == max(mean_km3),
     zone_short = unname(zone_labels[zone_id])
   ) %>%
   ungroup() %>%
   mutate(
     zone_id = factor(zone_id, levels = zone_order),
-    month_label = factor(month.abb[month], levels = month.abb),
-    facet_label = paste0(zone_short, " · ", round(annual_mean_mm), " mm/year")
+    month_label = factor(month.abb[month], levels = month.abb)
   )
-
-monthly_climatology %>%
-  filter(peak) %>%
-  transmute(zone = zone_short, peak_month = month.abb[month], mean_mm = round(mean_mm))
 ```
 
-```{r, fig.width=10, fig.height=9}
-monthly_climatology %>%
+Rainfall depth is useful for comparing how wet two catchments are. It is not
+additive. For cumulative checkpoints, use the total volume of rain falling over
+the upstream area.
+
+```{r}
+mainstem_order <- c(
+  "upstream_krs",
+  "upstream_biligundlu",
+  "upstream_mettur",
+  "whole_basin"
+)
+
+mainstem_summary <- monthly_volume %>%
+  filter(as.character(zone_id) %in% mainstem_order) %>%
+  distinct(zone_id, zone_short, annual_mean_km3) %>%
+  mutate(zone_id = factor(as.character(zone_id), levels = mainstem_order)) %>%
+  arrange(zone_id)
+
+mainstem_summary %>%
+  transmute(
+    checkpoint = zone_short,
+    gross_rainfall_km3_year = round(annual_mean_km3, 1)
+  )
+```
+
+The cumulative main-stem sequence now behaves as it should: about 11.9 km³ of
+rain falls upstream of KRS each year, rising to 35.8 at Biligundlu, 40.5 at
+Mettur, and 81.7 across the whole basin.
+
+```{r, fig.width=10, fig.height=6}
+mainstem_monthly <- monthly_volume %>%
+  filter(as.character(zone_id) %in% mainstem_order) %>%
+  mutate(
+    zone_id = factor(as.character(zone_id), levels = mainstem_order),
+    series_label = paste0(
+      zone_short,
+      " · ",
+      round(annual_mean_km3, 1),
+      " km³/year"
+    )
+  )
+
+mainstem_endpoints <- mainstem_monthly %>%
+  filter(month == 12)
+
+mainstem_monthly %>%
+  ggplot(aes(month, mean_km3, colour = zone_id, group = zone_id)) +
+  geom_line(linewidth = 0.9) +
+  geom_point(size = 1.7) +
+  geom_text_repel(
+    data = mainstem_endpoints,
+    aes(label = series_label),
+    direction = "y",
+    hjust = 0,
+    nudge_x = 0.45,
+    min.segment.length = 0,
+    segment.colour = "grey65",
+    segment.size = 0.25,
+    size = 3.1,
+    seed = 42,
+    show.legend = FALSE
+  ) +
+  scale_colour_manual(
+    values = c("#9cbcbc", "#679b99", "#397f7d", "#175f60"),
+    guide = "none"
+  ) +
+  scale_x_continuous(
+    breaks = c(1, 4, 7, 10, 12),
+    labels = month.abb[c(1, 4, 7, 10, 12)],
+    limits = c(1, 14.8)
+  ) +
+  scale_y_continuous(
+    labels = scales::label_number(accuracy = 0.1),
+    expand = expansion(mult = c(0, 0.08))
+  ) +
+  labs(
+    title = "Rainfall volume accumulates downstream",
+    subtitle = "Average gross rainfall over nested upstream areas, 1951-2024",
+    x = NULL,
+    y = "mean monthly rainfall volume (km³)",
+    caption = "KRS → Biligundlu → Mettur are cumulative main-stem checkpoints. Volume is rainfall over land, not reservoir inflow. Source: IMD 0.25° daily grid."
+  ) +
+  theme_minimal(base_size = 11) +
+  theme(
+    panel.grid.minor = element_blank(),
+    panel.grid.major.x = element_blank(),
+    plot.title = element_text(face = "bold", size = 15),
+    plot.subtitle = element_text(colour = "grey35", margin = margin(b = 8)),
+    plot.caption = element_text(colour = "grey45", hjust = 0, size = 7.5),
+    plot.margin = margin(12, 110, 12, 12)
+  ) -> mainstem_monthly_chart
+
+ggsave(
+  "outputs/kaveri_monthly_rainfall_climatology.png",
+  mainstem_monthly_chart,
+  width = 10,
+  height = 6,
+  dpi = 180,
+  bg = "white"
+)
+```
+
+Harangi, Hemavathi, Kabini, Bhavanisagar and Amaravathi are tributary branches,
+not successive downstream checkpoints. Their volumes should be read separately.
+
+```{r, fig.width=10, fig.height=6.5}
+tributary_order <- c(
+  "upstream_harangi",
+  "upstream_hemavathi",
+  "upstream_kabini",
+  "upstream_bhavanisagar",
+  "upstream_amaravathi"
+)
+
+tributary_monthly <- monthly_volume %>%
+  filter(as.character(zone_id) %in% tributary_order) %>%
+  mutate(
+    zone_id = factor(as.character(zone_id), levels = tributary_order),
+    facet_label = paste0(
+      zone_short,
+      " · ",
+      round(annual_mean_km3, 1),
+      " km³/year"
+    )
+  )
+
+tributary_facet_levels <- tributary_monthly %>%
+  distinct(zone_id, facet_label) %>%
+  arrange(zone_id) %>%
+  pull(facet_label)
+
+tributary_monthly <- tributary_monthly %>%
   mutate(
     facet_label = factor(
       facet_label,
-      levels = monthly_climatology %>%
-        distinct(zone_id, facet_label) %>%
-        arrange(zone_id) %>%
-        pull(facet_label)
+      levels = tributary_facet_levels
     )
-  ) %>%
-  ggplot(aes(month_label, mean_mm, fill = peak)) +
+  )
+
+tributary_monthly %>%
+  ggplot(aes(month_label, mean_km3, fill = peak)) +
   geom_col(width = 0.75) +
-  facet_wrap(vars(facet_label), ncol = 2, scales = "free_y") +
-  scale_fill_manual(values = c(`FALSE` = "grey78", `TRUE` = "#176d6e"), guide = "none") +
+  facet_wrap(vars(facet_label), ncol = 3) +
+  scale_fill_manual(
+    values = c(`FALSE` = "grey78", `TRUE` = "#176d6e"),
+    guide = "none"
+  ) +
   scale_x_discrete(breaks = month.abb[c(1, 4, 7, 10)]) +
-  scale_y_continuous(expand = expansion(mult = c(0, 0.12))) +
+  scale_y_continuous(
+    limits = c(0, 1),
+    labels = scales::label_number(accuracy = 0.1),
+    expand = expansion(mult = c(0, 0.08))
+  ) +
   labs(
-    title = "Headwater catchments peak in July; the whole basin peaks in October",
-    subtitle = "Average monthly rainfall, 1951-2024. The peak month is highlighted; panel scales vary.",
+    title = "Tributary reservoirs sit on separate branches",
+    subtitle = "Average monthly gross rainfall over each upstream catchment, 1951-2024; shared scale",
     x = NULL,
-    y = "mean monthly rainfall (mm)",
-    caption = "Source: IMD 0.25° daily grid; area-weighted to CWC/HydroBASINS catchments."
+    y = "mean monthly rainfall volume (km³)",
+    caption = "Peak month highlighted. These five catchments are not a downstream sequence. Source: IMD 0.25° daily grid."
   ) +
   theme_minimal(base_size = 10) +
   theme(
@@ -350,21 +479,17 @@ monthly_climatology %>%
     plot.subtitle = element_text(colour = "grey35", margin = margin(b = 8)),
     plot.caption = element_text(colour = "grey45", hjust = 0, size = 7.5),
     plot.margin = margin(12, 18, 12, 12)
-  ) -> monthly_chart
+  ) -> tributary_monthly_chart
 
 ggsave(
-  "outputs/kaveri_monthly_rainfall_climatology.png",
-  monthly_chart,
+  "outputs/kaveri_tributary_monthly_rainfall.png",
+  tributary_monthly_chart,
   width = 10,
-  height = 9,
+  height = 6.5,
   dpi = 180,
   bg = "white"
 )
 ```
-
-The rainfall timing changes materially downstream. Harangi, Hemavathi and
-Kabini get roughly two-thirds of annual rain in June-September. For the whole
-basin, June-September contributes 45% and October-December 37%.
 
 What this still does not answer: how much reaches a reservoir. That needs
 runoff, evapotranspiration, soil storage, withdrawals, and reservoir operations.
