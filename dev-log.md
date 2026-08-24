@@ -169,3 +169,18 @@ three scripts and rebuilds everything from the original sources.
 - Aggregated 1901-2025 daily rainfall into monthly and annual area-weighted depth and volume using DuckDB.
 - Kept trend claims to 1951-2024 after confirming a pre-1951 Western Ghats discontinuity, especially in Kabini.
 - Added `kaveri_rainfall.Rmd`, three reproducible scripts, README instructions, and a public-facing draft in `blog-post.md`.
+
+<!-- claude-session:b8522f13-d30a-4f34-b421-005dbe9a5968:start -->
+## 2026-08-19 13:45 IST | Claude session `b8522f13-d30`
+
+### User prompts
+> <ide_opened_file>The user opened the file /Users/Karthik/Documents/work/data_work/weather/explore_rainfall.Rmd in the IDE. This may or may not be related to the current task.</ide_opened_file> Harold Edwin Hurst came...
+> actually use data only from post 1951 for this.
+
+### Work done
+- Final re-run to confirm everything executes clean after the text edits.
+- Clean. Notebook now runs on **1951–2024** throughout. **Post-1951 results (sorted by storage need):** | City | Storage (yrs) | H | |---|---|---| | Delhi | 6.9 | 0.83 | | Bengaluru | 5.2 | 0.87 | | Jaipur | 4.8 | 0.74...
+- Touched files: `kaveri_rainfall.Rmd`, `.posit/`, `explore_rainfall.Rmd`, `hurst_rainfall.Rmd`
+- kaveri_rainfall.Rmd | 371 +++++++++-------------------------------------------
+
+<!-- claude-session:b8522f13-d30a-4f34-b421-005dbe9a5968:end -->
