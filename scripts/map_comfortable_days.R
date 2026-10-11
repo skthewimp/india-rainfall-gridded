@@ -18,6 +18,16 @@ MIN_OBSERVED_SHARE <- 0.9      # drop cells missing >10% of days in a period
 
 teal <- "#176d6e"
 rust <- "#a65425"
+comfort_colours <- c(
+  "#f6d9f2", # pink: fewest comfortable days
+  "#c3a6ea",
+  "#6fb1ee", # blue
+  "#3fbfa6",
+  "#9ad15a", # green
+  "#f5df45", # yellow
+  "#f39c33", # orange
+  "#cf2a1e"  # red: most comfortable days
+)
 
 # Cities labelled on the maps. Each reads the value of its nearest grid cell.
 # side is where the label sits relative to the point.
@@ -101,7 +111,7 @@ map_theme <- theme_void(base_size = 10) +
     legend.title = element_text(colour = "grey30", size = 8.5),
     legend.text = element_text(colour = "grey30", size = 8),
     legend.key.height = unit(7, "pt"),
-    legend.key.width = unit(38, "pt"),
+    legend.key.width = unit(48, "pt"),
     plot.margin = margin(14, 14, 10, 14)
   )
 
@@ -144,15 +154,16 @@ ggplot() +
   ) +
   geom_sf(data = states, fill = NA, colour = "white", linewidth = 0.2) +
   city_layers(recent_labels, paste(recent_labels$city, recent_labels$value)) +
-  scale_fill_steps(
-    low = "#f1eee7",
-    high = teal,
-    breaks = c(50, 100, 150, 200, 250),
+  # Pink-blue-green-yellow-red scale after the South America map this copies:
+  # red is the most comfortable.
+  scale_fill_gradientn(
+    colours = comfort_colours,
+    breaks = c(0, 50, 100, 150, 200, 250, 300),
     limits = c(0, 300),
     name = "Comfortable days a year"
   ) +
   coord_sf(xlim = c(67.5, 97.6), ylim = c(6.5, 37.3), expand = FALSE) +
-  guides(fill = guide_coloursteps(title.position = "top")) +
+  guides(fill = guide_colourbar(title.position = "top")) +
   labs(
     title = "Comfortable weather lives in the hills, the north-east and Karnataka",
     subtitle = sprintf(
