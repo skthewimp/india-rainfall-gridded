@@ -21,15 +21,14 @@ MIN_OBSERVED_SHARE <- 0.9      # drop cells missing >10% of days in a period
 
 teal <- "#176d6e"
 rust <- "#a65425"
+# ColorBrewer RdYlGn: red is the fewest comfortable days, green the most.
 comfort_colours <- c(
-  "#f6d9f2", # pink: fewest comfortable days
-  "#c3a6ea",
-  "#6fb1ee", # blue
-  "#3fbfa6",
-  "#9ad15a", # green
-  "#f5df45", # yellow
-  "#f39c33", # orange
-  "#cf2a1e"  # red: most comfortable days
+  "#d73027",
+  "#fc8d59",
+  "#fee08b",
+  "#d9ef8b",
+  "#91cf60",
+  "#1a9850"
 )
 
 # Cities labelled on the maps: the 20 largest urban areas, swapping a few
@@ -129,6 +128,20 @@ cells_to_squares(change) ->
 print(recent_labels %>% select(city, value))
 print(change_labels %>% select(city, value))
 
+# Colour scales run from the lowest cell to the highest, so both ends of the
+# colour range are used. Legend breaks are the two ends plus round numbers
+# that are not crowding them.
+scale_ends <- function(values) {
+  c(floor(min(values)), ceiling(max(values)))
+}
+
+end_breaks <- function(values, step) {
+  ends <- scale_ends(values)
+  inner <- seq(ceiling(ends[1] / step) * step, ends[2], by = step)
+  inner <- inner[inner - ends[1] >= step / 2 & ends[2] - inner >= step / 2]
+  sort(c(ends, inner))
+}
+
 # ---- Shared map styling ----
 map_theme <- theme_void(base_size = 10) +
   theme(
@@ -193,12 +206,10 @@ ggplot() +
   geom_sf(data = states, fill = NA, colour = "white", linewidth = 0.2) +
   geom_sf(data = india, fill = NA, colour = "grey35", linewidth = 0.3) +
   city_layers(recent_labels, paste(recent_labels$city, recent_labels$value)) +
-  # Pink-blue-green-yellow-red scale after the South America map this copies:
-  # red is the most comfortable.
   scale_fill_gradientn(
     colours = comfort_colours,
-    breaks = c(0, 50, 100, 150, 200, 250, 300),
-    limits = c(0, 300),
+    breaks = end_breaks(recent$comfortable_days, 50),
+    limits = scale_ends(recent$comfortable_days),
     name = "Comfortable days a year",
     aesthetics = c("fill", "colour")
   ) +
@@ -218,8 +229,6 @@ ggplot() +
 ggsave("outputs/comfortable_days_map.png", width = 7.5, height = 8, dpi = 200, bg = "white")
 
 # ---- Map 2: change between the two periods ----
-change_limit <- 50
-
 ggplot() +
   geom_sf(data = india, fill = "white", colour = NA) +
   geom_sf(
@@ -237,11 +246,12 @@ ggplot() +
     low = rust,
     mid = "#f4f2ee",
     high = teal,
+    # The midpoint stays at zero, so the smaller gains side never reaches
+    # full teal: equal shades mean equal changes in either direction.
     midpoint = 0,
-    limits = c(-change_limit, change_limit),
-    oob = scales::squish,
-    breaks = c(-50, -25, 0, 25, 50),
-    labels = c("-50 or more", "-25", "0", "+25", "+50 or more"),
+    limits = scale_ends(change$change),
+    breaks = end_breaks(change$change, 25),
+    labels = function(x) if_else(x == 0, "0", sprintf("%+d", as.integer(x))),
     name = "Change in comfortable days a year",
     aesthetics = c("fill", "colour")
   ) +
