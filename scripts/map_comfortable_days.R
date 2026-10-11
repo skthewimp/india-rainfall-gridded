@@ -8,8 +8,11 @@ suppressPackageStartupMessages({
   library(arrow)
   library(dplyr)
   library(ggplot2)
+  library(ggrepel)
   library(sf)
 })
+
+sf_use_s2(FALSE) # planar geometry: the grid is a lat/lon lattice
 
 # ---- Parameters ----
 RECENT_YEARS <- c(1995, 2024)  # 2025 left out: provisional
@@ -29,27 +32,54 @@ comfort_colours <- c(
   "#cf2a1e"  # red: most comfortable days
 )
 
-# Cities labelled on the maps. Each reads the value of its nearest grid cell.
-# side is where the label sits relative to the point.
+# Cities labelled on the maps: the 20 largest urban areas, swapping a few
+# near-neighbours (Kanpur, Thane) for regional spread. Each reads the value of
+# its nearest grid cell.
 cities <- tribble(
-  ~city, ~city_lat, ~city_lon, ~side,
-  "Delhi", 28.61, 77.21, "right",
-  "Mumbai", 19.08, 72.88, "right",
-  "Chennai", 13.08, 80.27, "right",
-  "Kolkata", 22.57, 88.36, "right",
-  "Bengaluru", 12.97, 77.59, "left",
-  "Hyderabad", 17.39, 78.49, "right",
-  "Pune", 18.52, 73.86, "right",
-  "Jaipur", 26.91, 75.79, "right",
-  "Srinagar", 34.08, 74.80, "right"
+  ~city, ~city_lat, ~city_lon,
+  "Delhi", 28.61, 77.21,
+  "Mumbai", 19.08, 72.88,
+  "Kolkata", 22.57, 88.36,
+  "Chennai", 13.08, 80.27,
+  "Bengaluru", 12.97, 77.59,
+  "Hyderabad", 17.39, 78.49,
+  "Ahmedabad", 23.02, 72.57,
+  "Pune", 18.52, 73.86,
+  "Surat", 21.17, 72.83,
+  "Jaipur", 26.91, 75.79,
+  "Lucknow", 26.85, 80.95,
+  "Nagpur", 21.15, 79.09,
+  "Indore", 22.72, 75.86,
+  "Bhopal", 23.26, 77.41,
+  "Patna", 25.59, 85.14,
+  "Visakhapatnam", 17.69, 83.22,
+  "Kochi", 9.93, 76.27,
+  "Guwahati", 26.14, 91.74,
+  "Chandigarh", 30.73, 76.78,
+  "Srinagar", 34.08, 74.80
 )
 
 # ---- Data ----
 read_parquet("data/comfortable_days_annual.parquet") ->
   annual
 
+# DataMeet state boundaries, which follow India's official boundary
+# (Ladakh includes Gilgit-Baltistan and Aksai Chin).
 read_sf("sources/boundaries/india_adm1.geojson", quiet = TRUE) ->
   states
+
+states %>%
+  st_union() ->
+  india
+
+# Grid cells as 0.25° squares clipped to India's boundary, so cells don't spill
+# over the coast or the border. Areas with no data stay white.
+cells_to_squares <- function(cells) {
+  cells %>%
+    st_as_sf(coords = c("lon", "lat"), crs = 4326, remove = FALSE) %>%
+    st_buffer(dist = 0.125, endCapStyle = "SQUARE") %>%
+    st_intersection(india)
+}
 
 # Average comfortable days a year over a period. Days with a missing flag are
 # left out of the denominator, then the rate is scaled to a 365.25-day year.
@@ -81,11 +111,7 @@ label_cities <- function(cells, value_col) {
     cross_join(cells) %>%
     mutate(dist2 = (lat - city_lat)^2 + (lon - city_lon)^2) %>%
     slice_min(dist2, n = 1, with_ties = FALSE, by = city) %>%
-    mutate(
-      value = round(.data[[value_col]]),
-      label_lon = if_else(side == "left", city_lon - 0.45, city_lon + 0.45),
-      hjust = if_else(side == "left", 1, 0)
-    )
+    mutate(value = round(.data[[value_col]]))
 }
 
 label_cities(recent, "comfortable_days") ->
@@ -93,6 +119,12 @@ label_cities(recent, "comfortable_days") ->
 
 label_cities(change, "change") ->
   change_labels
+
+cells_to_squares(recent) ->
+  recent_squares
+
+cells_to_squares(change) ->
+  change_squares
 
 print(recent_labels %>% select(city, value))
 print(change_labels %>% select(city, value))
@@ -126,14 +158,20 @@ city_layers <- function(labels, label_text) {
       size = 1.6,
       stroke = 0.5
     ),
-    geom_label(
+    geom_label_repel(
       data = labels,
-      aes(label_lon, city_lat, label = label_text, hjust = hjust),
-      size = 2.7,
+      aes(city_lon, city_lat, label = label_text),
+      size = 2.5,
       colour = "grey10",
-      fill = alpha("white", 0.8),
-      linewidth = 0,
-      label.padding = unit(1.5, "pt")
+      fill = alpha("white", 0.85),
+      linewidth = 0, # no box border
+      label.padding = unit(1.5, "pt"),
+      box.padding = unit(3, "pt"),
+      point.padding = unit(3, "pt"),
+      min.segment.length = 0.3,
+      segment.colour = "grey30",
+      segment.size = 0.3,
+      seed = 1
     )
   )
 }
@@ -146,13 +184,14 @@ caption_text <- paste0(
 
 # ---- Map 1: comfortable days a year, recent period ----
 ggplot() +
-  geom_tile(
-    data = recent,
-    aes(lon, lat, fill = comfortable_days),
-    width = 0.25,
-    height = 0.25
+  geom_sf(data = india, fill = "white", colour = NA) +
+  geom_sf(
+    data = recent_squares,
+    aes(fill = comfortable_days, colour = comfortable_days),
+    linewidth = 0.1
   ) +
   geom_sf(data = states, fill = NA, colour = "white", linewidth = 0.2) +
+  geom_sf(data = india, fill = NA, colour = "grey35", linewidth = 0.3) +
   city_layers(recent_labels, paste(recent_labels$city, recent_labels$value)) +
   # Pink-blue-green-yellow-red scale after the South America map this copies:
   # red is the most comfortable.
@@ -160,10 +199,11 @@ ggplot() +
     colours = comfort_colours,
     breaks = c(0, 50, 100, 150, 200, 250, 300),
     limits = c(0, 300),
-    name = "Comfortable days a year"
+    name = "Comfortable days a year",
+    aesthetics = c("fill", "colour")
   ) +
   coord_sf(xlim = c(67.5, 97.6), ylim = c(6.5, 37.3), expand = FALSE) +
-  guides(fill = guide_colourbar(title.position = "top")) +
+  guides(fill = guide_colourbar(title.position = "top"), colour = "none") +
   labs(
     title = "Comfortable weather lives in the hills, the north-east and Karnataka",
     subtitle = sprintf(
@@ -181,13 +221,14 @@ ggsave("outputs/comfortable_days_map.png", width = 7.5, height = 8, dpi = 200, b
 change_limit <- 50
 
 ggplot() +
-  geom_tile(
-    data = change,
-    aes(lon, lat, fill = change),
-    width = 0.25,
-    height = 0.25
+  geom_sf(data = india, fill = "white", colour = NA) +
+  geom_sf(
+    data = change_squares,
+    aes(fill = change, colour = change),
+    linewidth = 0.1
   ) +
   geom_sf(data = states, fill = NA, colour = "white", linewidth = 0.2) +
+  geom_sf(data = india, fill = NA, colour = "grey35", linewidth = 0.3) +
   city_layers(
     change_labels,
     paste(change_labels$city, sprintf("%+d", as.integer(change_labels$value)))
@@ -201,10 +242,11 @@ ggplot() +
     oob = scales::squish,
     breaks = c(-50, -25, 0, 25, 50),
     labels = c("-50 or more", "-25", "0", "+25", "+50 or more"),
-    name = "Change in comfortable days a year"
+    name = "Change in comfortable days a year",
+    aesthetics = c("fill", "colour")
   ) +
   coord_sf(xlim = c(67.5, 97.6), ylim = c(6.5, 37.3), expand = FALSE) +
-  guides(fill = guide_colourbar(title.position = "top")) +
+  guides(fill = guide_colourbar(title.position = "top"), colour = "none") +
   labs(
     title = "The Deccan has lost a month of comfortable days a year to heat",
     subtitle = sprintf(
