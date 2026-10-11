@@ -1,9 +1,12 @@
-# India daily gridded rainfall → Parquet
+# India daily gridded rainfall and temperature → Parquet
 
 Scripts to turn the India Meteorological Department's 0.25° daily gridded
 rainfall archive (NetCDF, one file per year, 1901–2025) into a tidy,
 year-partitioned Parquet dataset, plus a mapping from IMD grid cells to Indian
 towns and cities.
+
+Also includes IMD's 1° daily minimum/maximum temperature archive, 1951–2025,
+converted to a separate year-partitioned Parquet dataset (see below).
 
 **No data is shipped in this repo** — only the code. See
 [Data & licensing](#data--licensing) for why, and how to fetch the data
@@ -38,8 +41,7 @@ each 25 MB NetCDF year to ~3.5 MB of Parquet.
 Python side (download + NetCDF → Parquet), using [uv](https://docs.astral.sh/uv/):
 
 ```bash
-uv venv .venv
-uv pip install --python .venv/bin/python xarray netCDF4 pandas pyarrow
+uv pip install --python /Users/Karthik/envs/datascience/.venv/bin/python xarray netCDF4 pandas pyarrow
 ```
 
 R side (lookup table + charts) needs `arrow`, `dplyr`, `lubridate`, `ggplot2`.
@@ -52,11 +54,11 @@ The Kaveri analysis additionally uses `sf`, `duckdb`, `DBI`, `trend`, and
 # 1. Download all years 1901–2025 and convert to rainfall_parquet/
 #    Resumable: re-running skips years already converted. Deletes each .nc
 #    after converting. ~30–45 min, ~3 GB downloaded, polite 2 s delay.
-.venv/bin/python scripts/scrape.py
+/Users/Karthik/envs/datascience/.venv/bin/python scripts/scrape.py
 
 # 2. Map Indian populated places (GeoNames) to their grid cell.
 #    Needs IN.txt + admin1.txt (see below).
-.venv/bin/python scripts/citymap.py
+/Users/Karthik/envs/datascience/.venv/bin/python scripts/citymap.py
 
 # 3. Label each cell with its largest town.
 Rscript scripts/build_cell_lookup.R
@@ -88,6 +90,79 @@ open_dataset("rainfall_parquet") |>
 
 `open_dataset()` is lazy — filters push down to the Parquet files, so pulling
 one cell out of 226M rows is quick.
+
+## Daily gridded temperature
+
+`scripts/download_temperature.py` downloads IMD's daily minimum and maximum
+temperature archive, 1951–2025, on its 1° × 1° grid. Both live download selectors
+offered 2025 when checked on 11 October 2026, although the descriptive text still
+said 1951–2024. The status of the 2025 temperature release is not specified there.
+
+```bash
+/Users/Karthik/envs/datascience/.venv/bin/python scripts/download_temperature.py
+# To fetch or resume a smaller interval:
+/Users/Karthik/envs/datascience/.venv/bin/python scripts/download_temperature.py --start-year 2024 --end-year 2025
+```
+
+Dependencies: `numpy`, `pandas`, `pyarrow`, and `requests`, installed in the central
+Python environment. Paths resolve relative to the script, so any working directory
+is supported. Existing Parquet years are skipped; failed years are reported and
+can be retried with the same command.
+
+The completed 1951–2025 download contains 9,625,751 cell-days across 75 Parquet
+files (43.5 MB), covering all 27,394 dates and 362 distinct grid points over the
+period. Each year's cell-day keys were checked for uniqueness. The 150 original
+binary files occupy 210.6 MB. Coverage varies by cell and day: 1,025 retained
+rows lack Tmin and 2,659 lack Tmax.
+
+Three source rows have Tmin > Tmax and are retained unchanged: 25 May 2009 at
+(21.5°N, 87.5°E) and (21.5°N, 88.5°E), and 3 May 2019 at (21.5°N, 88.5°E).
+Exclude or investigate these explicitly when calculating daily temperature range.
+
+- Canonical analytical output: `temperature_parquet/year=YYYY/data.parquet`,
+  with `date`, `lat`, `lon`, `tmin_c`, `tmax_c`; partition directory supplies `year`.
+  The intended unique key is `(date, lat, lon)`, checked before each atomic write.
+- Original downloads: `sources/temperature/{mintemp,maxtemp}_YYYY.grd`, retained
+  to allow rebuilding without depending on the intermittently slow IMD server.
+- Binary layout: little-endian float32, day then latitude then longitude;
+  31 latitudes from 7.5°N to 37.5°N, 31 longitudes from 67.5°E to 97.5°E.
+  IMD's `99.9` missing sentinel becomes null. Grid-days with both values missing
+  are omitted; partially missing observations and Tmin > Tmax are retained and
+  reported. File sizes, dates, physical bounds, and unique keys are checked.
+- This grid is coarser than the rainfall grid; the rainfall town lookup should
+  not be reused as a temperature lookup without spatial remapping.
+- IMD notes that 2008 onward uses fewer stations (around 180), affecting
+  interpretation of trends across that change.
+
+Sources: [maximum temperature](https://www.imdpune.gov.in/cmpg/Griddata/Max_1_Bin.html)
+and [minimum temperature](https://www.imdpune.gov.in/cmpg/Griddata/Min_1_Bin.html).
+The script POSTs the year to `maxtemp.php` or `mintemp.php`, as their forms do.
+Data remain © IMD and are excluded from Git. IMD requests the citation:
+Srivastava, Rajeevan & Kshirsagar (2009), *Development of High Resolution Daily
+Gridded Temperature Data Set (1969–2005) for the Indian Region*,
+[doi:10.1002/asl.232](https://doi.org/10.1002/asl.232).
+
+## Comfortable days
+
+A day counts as comfortable when the daily high is 15-30°C, the overnight low is
+at least 8°C, and rainfall is under 15 mm (the top of IMD's "light rain" band).
+There is no humidity in the IMD data, so humid coasts look kinder than they feel.
+
+```bash
+Rscript scripts/build_comfortable_days.R   # ~2 min
+Rscript scripts/map_comfortable_days.R
+```
+
+The build script writes `comfort_parquet/year=YYYY/`, one row per 0.25° rainfall
+cell per day, 1951-2025 (136M rows). Each rainfall cell takes the temperature of
+the 1° cell it sits in; 60 coastal and border cells with no 1° cell above them take
+the nearest one and are flagged `temp_from_neighbour`. `comfortable` is NULL when
+any input is missing that day. It also writes `data/comfortable_days_annual.parquet`
+(days, observed days and comfortable days per cell per year). The thresholds are
+at the top of the script.
+
+The map script draws the 1995-2024 average and the change since 1951-1980 into
+`outputs/`, dropping cells missing more than 10% of days in a period.
 
 ## Kaveri catchment analysis
 
