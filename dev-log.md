@@ -302,3 +302,17 @@ Built with Claude Code. Charts in `outputs/`, write-up in
   `linewidth` aesthetic, so set `linewidth = 0`.
 - City names placed at a data x-coordinate widened the x-scale; fixed x limits
   so names and end labels fit without moving the data.
+
+<!-- claude-session:b0de8b11-023d-4636-8537-9716af80bdf6:start -->
+## 2026-10-11 16:26 IST | Claude session `b0de8b11-023`
+
+### User prompts
+> we have long term weather data (rainfall nad temperature) for all india, gridded. from 1951 onwards. use that to produce me a map of india like this one: https://x.com/gvtcontractor/status/2109034898996564161 . before...
+> ignore humidity for now. do with what we have - temperature and rain. both max and mintemp. max temp put at 15-30. >30 is still hard. and is rain < 5mm ok or should we make it 10mm? makes sense?
+> if imd says 2.5-15mm as light rain, let's keep 15mm as the cutoff. and 8deg for min is fine. and no point with elevation assessment. leave it at 1deg. one more thing - let's discuss a bit more onthe max temp
+
+### Work done
+- Now the .gitignore and README.
+- Everything is now committed and pushed (`8274444`), and the working tree is clean. That covers the three notebooks, all 13 charts in `outputs/`, the README, the changelog, the dev log and a new blog post. **What's in...
+
+<!-- claude-session:b0de8b11-023d-4636-8537-9716af80bdf6:end -->
