@@ -9,6 +9,9 @@
 #   comfort_parquet/year=YYYY/*.parquet       one row per rainfall cell per day
 #   data/comfortable_days_annual.parquet      one row per rainfall cell per year
 #
+# Each day gets a hard flag (comfortable) and a fuzzy score (comfort_score,
+# 0-1); see the parameters below.
+#
 # Run from the repo root after scrape.py and download_temperature.py.
 
 suppressPackageStartupMessages({
@@ -22,6 +25,22 @@ TMAX_MIN_C <- 15  # daytime high not cold
 TMAX_MAX_C <- 30  # daytime high not hot; >30 is uncomfortable in India
 TMIN_MIN_C <- 8   # night not cold (drops north Indian cold-wave weeks)
 RAIN_MAX_MM <- 15 # below IMD's "moderate rain" (light rain is 2.5-15.5 mm)
+
+# ---- Fuzzy comfort score ----
+# The hard rule says 30.0°C is comfortable and 30.1°C is not. The fuzzy score
+# treats each threshold as uncertain instead: think of it as the share of
+# people whose personal cut-off a day clears. Each condition gets a logistic
+# curve that is 0.5 at the hard threshold, and the day's score is the product
+# of the four (thresholds treated as independent). Summed over a year, scores
+# give "expected comfortable days"; as the widths go to zero this becomes the
+# hard count.
+#
+# Width = how many °C (or log-mm) it takes to move from 50% to 73%; the curve
+# goes from 88% to 12% over two widths either side of the threshold.
+TMAX_HOT_WIDTH_C <- 1.0   # 28°C ~ 88% comfortable, 32°C ~ 12%
+TMAX_COLD_WIDTH_C <- 1.5  # 12°C ~ 12%, 18°C ~ 88%
+TMIN_COLD_WIDTH_C <- 1.5  # 5°C ~ 12%, 11°C ~ 88%
+RAIN_WIDTH_LOG <- 0.4     # on log(mm): 7 mm ~ 87%, 30 mm ~ 15%
 
 FIRST_YEAR <- 1951 # temperature data starts here
 
@@ -102,9 +121,10 @@ map_check <- dbGetQuery(con, "
 print(map_check)
 stopifnot(map_check$cells == map_check$distinct_cells)
 
-# ---- Daily flags ----
-# comfortable is NULL (unknown) when any input is missing that day - e.g. a
-# temperature cell that IMD only covers from 1969, or a missing Tmax value.
+# ---- Daily flags and fuzzy scores ----
+# comfortable and comfort_score are NULL (unknown) when any input is missing
+# that day - e.g. a temperature cell that IMD only covers from 1969, or a
+# missing Tmax value.
 dbExecute(con, sprintf("
   COPY (
     SELECT
@@ -122,7 +142,18 @@ dbExecute(con, sprintf("
         t.tmax_c BETWEEN %1$s AND %2$s
         AND t.tmin_c >= %3$s
         AND r.rainfall_mm < %4$s
-      ) AS comfortable
+      ) AS comfortable,
+      -- not too hot by day
+      1 / (1 + exp((t.tmax_c - %2$s) / %5$s))
+      -- not too cold by day
+      * 1 / (1 + exp((%1$s - t.tmax_c) / %6$s))
+      -- not too cold at night
+      * 1 / (1 + exp((%3$s - t.tmin_c) / %7$s))
+      -- not too wet (a dry day scores 1)
+      * CASE
+          WHEN r.rainfall_mm <= 0 THEN 1
+          ELSE 1 / (1 + exp((ln(r.rainfall_mm) - ln(%4$s)) / %8$s))
+        END AS comfort_score
     FROM rainfall r
     INNER JOIN cell_map m
       ON r.lat = m.lat
@@ -134,7 +165,10 @@ dbExecute(con, sprintf("
     ORDER BY r.date, r.lat, r.lon
   )
   TO 'comfort_parquet' (FORMAT parquet, PARTITION_BY (year), COMPRESSION zstd)
-", TMAX_MIN_C, TMAX_MAX_C, TMIN_MIN_C, RAIN_MAX_MM))
+",
+  TMAX_MIN_C, TMAX_MAX_C, TMIN_MIN_C, RAIN_MAX_MM,
+  TMAX_HOT_WIDTH_C, TMAX_COLD_WIDTH_C, TMIN_COLD_WIDTH_C, RAIN_WIDTH_LOG
+))
 
 dbExecute(con, "
   CREATE VIEW comfort AS
@@ -170,7 +204,12 @@ dbExecute(con, "
       any_value(temp_from_neighbour) AS temp_from_neighbour,
       count(*) AS days,
       count(comfortable) AS observed_days,
-      count(*) FILTER (WHERE comfortable) AS comfortable_days
+      count(*) FILTER (WHERE comfortable) AS comfortable_days,
+      -- The score needs every input; the hard flag can be FALSE with one
+      -- input missing (a 35°C day fails whatever the rain), so it has its
+      -- own, slightly smaller, denominator.
+      count(comfort_score) AS score_observed_days,
+      coalesce(sum(comfort_score), 0) AS comfort_score_days
     FROM comfort
     GROUP BY lat, lon, year
     ORDER BY lat, lon, year

@@ -163,6 +163,25 @@ at the top of the script.
 
 The map script draws the 1995-2024 average and the change since 1951-1980 into
 `outputs/`, dropping cells missing more than 10% of days in a period.
+`scripts/plot_city_comfort_trends.R` plots yearly counts with a loess trend for
+12 of the largest cities.
+
+### Fuzzy comfort score
+
+The hard rule calls 30.0°C comfortable and 30.1°C not. Each day also gets a
+`comfort_score` between 0 and 1: every threshold becomes a logistic curve that
+is 0.5 at the hard cut-off and fades over a few degrees (or, for rain, on a log
+scale), and the day's score is the product of the four. Read it as the share of
+people whose own cut-offs the day clears. Summed over a year it gives expected
+comfortable days (`comfort_score_days` in the annual table, over
+`score_observed_days`). The curve widths sit at the top of the build script.
+
+```bash
+Rscript scripts/map_comfortable_days.R fuzzy
+Rscript scripts/plot_city_comfort_trends.R fuzzy
+```
+
+These write the same charts with a `_fuzzy` suffix.
 
 ## Kaveri catchment analysis
 

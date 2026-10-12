@@ -3,6 +3,9 @@
 #
 #   outputs/city_comfortable_days.png
 #
+# Run with the argument `fuzzy` to plot the fuzzy comfort score (expected
+# comfortable days) instead; the output then ends in _fuzzy.png.
+#
 # Run scripts/build_comfortable_days.R first.
 
 suppressPackageStartupMessages({
@@ -15,6 +18,7 @@ suppressPackageStartupMessages({
 LAST_YEAR <- 2024          # 2025 left out: provisional
 MIN_OBSERVED_SHARE <- 0.9  # drop years missing >10% of days
 LOESS_SPAN <- 0.75
+FUZZY <- "fuzzy" %in% commandArgs(trailingOnly = TRUE)
 
 teal <- "#176d6e"
 
@@ -39,6 +43,17 @@ cities <- tribble(
 # ---- Data ----
 read_parquet("data/comfortable_days_annual.parquet") ->
   annual
+
+# In fuzzy mode, swap in the summed scores and their own denominator; the rest
+# of the script then runs unchanged.
+if (FUZZY) {
+  annual %>%
+    mutate(
+      comfortable_days = comfort_score_days,
+      observed_days = score_observed_days
+    ) ->
+    annual
+}
 
 # Each city reads its nearest 0.25° grid cell (same rule as the maps).
 annual %>%
@@ -89,6 +104,22 @@ city_years %>%
 
 print(trend_ends %>% select(city, year, trend))
 
+# ---- Text that differs between the hard and fuzzy versions ----
+if (FUZZY) {
+  output_suffix <- "_fuzzy"
+  chart_title <- "With fuzzy thresholds too, Bengaluru, Chennai and Hyderabad lost 30-46% of comfortable days"
+  measure_text <- "Expected comfortable days a year with fuzzy thresholds"
+  definition_text <- paste0(
+    "Fuzzy comfort: each day scores 0-1, 0.5 at each threshold (high 15°C or 30°C, low 8°C, 15 mm of rain) ",
+    "and fading over a few degrees or mm either side.\n"
+  )
+} else {
+  output_suffix <- ""
+  chart_title <- "Bengaluru, Chennai and Hyderabad have lost a third or more of their comfortable days"
+  measure_text <- "Comfortable days a year"
+  definition_text <- "A comfortable day: daily high 15-30°C, overnight low at least 8°C, and under 15 mm of rain.\n"
+}
+
 # ---- Chart ----
 city_years %>%
   ggplot(aes(year, comfortable)) +
@@ -126,19 +157,20 @@ city_years %>%
   ) +
   coord_cartesian(clip = "off") +
   labs(
-    title = "Bengaluru, Chennai and Hyderabad have lost a third or more of their comfortable days",
+    title = chart_title,
     subtitle = paste0(
-      "Comfortable days a year, 1951-2024; northern cities are flat or slightly up. ",
+      measure_text,
+      ", 1951-2024; northern cities are flat or slightly up.\n",
       "Dots are years; the line is a loess trend, labelled at each end."
     ),
     x = NULL,
     y = NULL,
     caption = paste0(
-      "A comfortable day: daily high 15-30°C, overnight low at least 8°C, and under 15 mm of rain. ",
-      "Each city is its nearest grid cell: rainfall on IMD's 0.25° grid,\n",
-      "temperature on its 1° grid. Cities are the largest urban agglomerations (Census 2011), largest first; ",
-      "Nagpur replaces Lucknow,\nwhich shares Kanpur's temperature cell. ",
-      "Years missing over 10% of days are dropped. Source: IMD."
+      definition_text,
+      "Each city is its nearest grid cell: rainfall on IMD's 0.25° grid, temperature on its 1° grid. ",
+      "Years missing over 10% of days are dropped.\n",
+      "Cities are the largest urban agglomerations (Census 2011), largest first; ",
+      "Nagpur replaces Lucknow, which shares Kanpur's temperature cell. Source: IMD."
     )
   ) +
   theme_minimal(base_size = 10) +
@@ -159,4 +191,10 @@ city_years %>%
     plot.margin = margin(14, 16, 10, 14)
   )
 
-ggsave("outputs/city_comfortable_days.png", width = 9, height = 7, dpi = 200, bg = "white")
+ggsave(
+  sprintf("outputs/city_comfortable_days%s.png", output_suffix),
+  width = 9,
+  height = 7.2,
+  dpi = 200,
+  bg = "white"
+)

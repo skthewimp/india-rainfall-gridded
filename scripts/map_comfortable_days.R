@@ -3,6 +3,9 @@
 #
 #   outputs/comfortable_days_map.png         average days a year, recent period
 #   outputs/comfortable_days_change_map.png  recent period minus early period
+#
+# Run with the argument `fuzzy` to map the fuzzy comfort score (expected
+# comfortable days) instead; outputs then end in _fuzzy.png.
 
 suppressPackageStartupMessages({
   library(arrow)
@@ -18,6 +21,7 @@ sf_use_s2(FALSE) # planar geometry: the grid is a lat/lon lattice
 RECENT_YEARS <- c(1995, 2024)  # 2025 left out: provisional
 EARLY_YEARS <- c(1951, 1980)
 MIN_OBSERVED_SHARE <- 0.9      # drop cells missing >10% of days in a period
+FUZZY <- "fuzzy" %in% commandArgs(trailingOnly = TRUE)
 
 teal <- "#176d6e"
 rust <- "#a65425"
@@ -61,6 +65,17 @@ cities <- tribble(
 # ---- Data ----
 read_parquet("data/comfortable_days_annual.parquet") ->
   annual
+
+# In fuzzy mode, swap in the summed scores and their own denominator; the rest
+# of the script then runs unchanged.
+if (FUZZY) {
+  annual %>%
+    mutate(
+      comfortable_days = comfort_score_days,
+      observed_days = score_observed_days
+    ) ->
+    annual
+}
 
 # DataMeet state boundaries, which follow India's official boundary
 # (Ladakh includes Gilgit-Baltistan and Aksai Chin).
@@ -148,7 +163,7 @@ map_theme <- theme_void(base_size = 10) +
     plot.background = element_rect(fill = "white", colour = NA),
     plot.title.position = "plot",
     plot.caption.position = "plot",
-    plot.title = element_text(face = "bold", size = 14.5, margin = margin(b = 4)),
+    plot.title = element_text(face = "bold", size = 13.5, margin = margin(b = 4)),
     plot.subtitle = element_text(colour = "grey35", margin = margin(b = 6)),
     plot.caption = element_text(colour = "grey45", hjust = 0, size = 7.5, lineheight = 1.1),
     legend.position = "top",
@@ -189,8 +204,24 @@ city_layers <- function(labels, label_text) {
   )
 }
 
+# ---- Text that differs between the hard and fuzzy versions ----
+if (FUZZY) {
+  output_suffix <- "_fuzzy"
+  definition_text <- paste0(
+    "Fuzzy comfort: each day scores 0-1. The score is 0.5 at each threshold (daily high 15°C or 30°C, low 8°C, 15 mm of rain)\n",
+    "and fades over a few degrees or millimetres either side; a year's scores add up to its expected comfortable days.\n"
+  )
+  map_subtitle <- "Expected comfortable days a year with fuzzy thresholds, %d-%d.\nA typical grid cell gets about 90."
+  change_title <- "With fuzzy thresholds, the Deccan has still lost about four weeks a year"
+} else {
+  output_suffix <- ""
+  definition_text <- "A comfortable day: daily high 15-30°C, overnight low at least 8°C, and under 15 mm of rain.\n"
+  map_subtitle <- "Average days a year with comfortable weather, %d-%d.\nA typical grid cell gets about 90."
+  change_title <- "The Deccan has lost a month of comfortable days a year to heat"
+}
+
 caption_text <- paste0(
-  "A comfortable day: daily high 15-30°C, overnight low at least 8°C, and under 15 mm of rain.\n",
+  definition_text,
   "No humidity data, so humid coasts look kinder than they feel. Temperature is on IMD's 1° grid (~110 km),\n",
   "so hill stations blur into the plains around them; rainfall is on the 0.25° grid. Source: IMD daily gridded data."
 )
@@ -218,7 +249,7 @@ ggplot() +
   labs(
     title = "Comfortable weather lives in the hills, the north-east and Karnataka",
     subtitle = sprintf(
-      "Average days a year with comfortable weather, %d-%d.\nA typical grid cell gets about 90.",
+      map_subtitle,
       RECENT_YEARS[1],
       RECENT_YEARS[2]
     ),
@@ -226,7 +257,13 @@ ggplot() +
   ) +
   map_theme
 
-ggsave("outputs/comfortable_days_map.png", width = 7.5, height = 8, dpi = 200, bg = "white")
+ggsave(
+  sprintf("outputs/comfortable_days_map%s.png", output_suffix),
+  width = 7.5,
+  height = 8,
+  dpi = 200,
+  bg = "white"
+)
 
 # ---- Map 2: change between the two periods ----
 ggplot() +
@@ -258,7 +295,7 @@ ggplot() +
   coord_sf(xlim = c(67.5, 97.6), ylim = c(6.5, 37.3), expand = FALSE) +
   guides(fill = guide_colourbar(title.position = "top"), colour = "none") +
   labs(
-    title = "The Deccan has lost a month of comfortable days a year to heat",
+    title = change_title,
     subtitle = sprintf(
       "Change in comfortable days a year, %d-%d vs %d-%d.\nThe north-west gained a few as its winter nights got warmer.",
       RECENT_YEARS[1],
@@ -270,4 +307,10 @@ ggplot() +
   ) +
   map_theme
 
-ggsave("outputs/comfortable_days_change_map.png", width = 7.5, height = 8, dpi = 200, bg = "white")
+ggsave(
+  sprintf("outputs/comfortable_days_change_map%s.png", output_suffix),
+  width = 7.5,
+  height = 8,
+  dpi = 200,
+  bg = "white"
+)
