@@ -1,4 +1,4 @@
-# Comfortable days per year, 1951-2024, for India's 12 largest cities.
+# Comfortable days per year, 1951-2024, for 12 of India's largest cities.
 # One panel per city, ordered by population; a dot per year and a loess trend.
 #
 #   outputs/city_comfortable_days.png
@@ -18,7 +18,8 @@ LOESS_SPAN <- 0.75
 
 teal <- "#176d6e"
 
-# 12 largest urban agglomerations, Census 2011, in descending order.
+# Largest urban agglomerations, Census 2011, in descending order. Lucknow
+# (12th) shares Kanpur's 1° temperature cell, so Nagpur (13th) replaces it.
 cities <- tribble(
   ~city, ~city_lat, ~city_lon,
   "Mumbai", 19.08, 72.88,
@@ -32,7 +33,7 @@ cities <- tribble(
   "Surat", 21.17, 72.83,
   "Jaipur", 26.91, 75.79,
   "Kanpur", 26.45, 80.33,
-  "Lucknow", 26.85, 80.95
+  "Nagpur", 21.15, 79.09
 )
 
 # ---- Data ----
@@ -114,8 +115,9 @@ city_years %>%
     caption = paste0(
       "A comfortable day: daily high 15-30°C, overnight low at least 8°C, and under 15 mm of rain. ",
       "Each city is its nearest grid cell: rainfall on IMD's 0.25° grid,\n",
-      "temperature on its 1° grid. Cities are the 12 largest urban agglomerations (Census 2011), ",
-      "largest first. Years missing over 10% of days are dropped. Source: IMD."
+      "temperature on its 1° grid. Cities are the largest urban agglomerations (Census 2011), largest first; ",
+      "Nagpur replaces Lucknow,\nwhich shares Kanpur's temperature cell. ",
+      "Years missing over 10% of days are dropped. Source: IMD."
     )
   ) +
   theme_minimal(base_size = 10) +
