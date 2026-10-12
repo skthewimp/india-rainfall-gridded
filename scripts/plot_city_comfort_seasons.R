@@ -213,6 +213,8 @@ seasonal %>%
   facet_wrap(vars(city), ncol = 4) +
   scale_x_continuous(
     breaks = month_starts[c(1, 4, 7, 10)],
+    # A faint gridline at the start of every month, labelled each quarter.
+    minor_breaks = month_starts,
     labels = c("Jan", "Apr", "Jul", "Oct"),
     limits = c(1, 365),
     expand = expansion(0)
@@ -248,8 +250,9 @@ seasonal %>%
     plot.caption = element_text(colour = "grey45", hjust = 0, size = 7.5, lineheight = 1.1),
     strip.text = element_blank(),
     panel.border = element_rect(colour = "grey75", fill = NA, linewidth = 0.4),
-    panel.grid.minor = element_blank(),
-    panel.grid.major.x = element_blank(),
+    panel.grid.minor.y = element_blank(),
+    panel.grid.minor.x = element_line(colour = "grey92", linewidth = 0.3),
+    panel.grid.major.x = element_line(colour = "grey92", linewidth = 0.3),
     panel.grid.major.y = element_line(colour = "grey92", linewidth = 0.3),
     axis.text = element_text(colour = "grey45", size = 8),
     panel.spacing = unit(6, "pt"),
