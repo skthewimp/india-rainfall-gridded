@@ -73,11 +73,16 @@ city_years %>%
   ) %>%
   print()
 
-# Trend values at both ends, labelled on each panel.
+# Trend values at both ends, labelled on each panel, set a few years out
+# from the end point so they clear the line and the dots.
+LABEL_GAP_YEARS <- 3
+
 city_years %>%
   filter(year == min(year) | year == max(year), .by = city) %>%
   mutate(
-    hjust = if_else(year == min(year), 1.2, -0.2),
+    is_start = year == min(year),
+    label_x = if_else(is_start, year - LABEL_GAP_YEARS, year + LABEL_GAP_YEARS),
+    hjust = if_else(is_start, 1, 0),
     .by = city
   ) ->
   trend_ends
@@ -92,7 +97,7 @@ city_years %>%
   geom_point(data = trend_ends, aes(y = trend), colour = teal, size = 1.6) +
   geom_text(
     data = trend_ends,
-    aes(y = trend, label = round(trend), hjust = hjust),
+    aes(x = label_x, y = trend, label = round(trend), hjust = hjust),
     colour = teal,
     size = 2.8,
     fontface = "bold"
@@ -100,7 +105,7 @@ city_years %>%
   facet_wrap(vars(city), ncol = 4) +
   scale_x_continuous(
     breaks = c(1960, 1990, 2020),
-    expand = expansion(mult = 0.15)
+    expand = expansion(mult = 0.2)
   ) +
   scale_y_continuous(breaks = seq(0, 300, 100)) +
   coord_cartesian(clip = "off") +
