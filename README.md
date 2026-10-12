@@ -8,9 +8,34 @@ towns and cities.
 Also includes IMD's 1° daily minimum/maximum temperature archive, 1951–2025,
 converted to a separate year-partitioned Parquet dataset (see below).
 
-**No data is shipped in this repo** — only the code. See
-[Data & licensing](#data--licensing) for why, and how to fetch the data
-yourself.
+On top of the data sit a few analyses: how many "comfortable" days each part of
+India gets and how that has changed since 1951, rainfall in the Kaveri basin,
+and Hurst-style persistence of city rainfall. Write-ups:
+
+- [`blog-comfortable-weather.md`](blog-comfortable-weather.md) - comfortable days across India
+- [`blog-post.md`](blog-post.md) - a century of rain in the Kaveri basin
+
+**No raw data is shipped in this repo** - only code, notebooks and rendered
+charts (`outputs/`). See [Data & licensing](#data--licensing) for why, and how
+to fetch the data yourself. Changes are listed in [`CHANGELOG.md`](CHANGELOG.md);
+how it was built is in [`dev-log.md`](dev-log.md).
+
+![Comfortable days a year across India, 1995-2024](outputs/comfortable_days_map.png)
+
+## Repository layout
+
+| Path | What it is |
+|---|---|
+| `scripts/` | Download, conversion and build scripts, plus the comfort chart scripts. Run from the repo root. |
+| `explore_rainfall.Rmd` | Notebook: first look at the rainfall grid, the monsoon curve, 2025, and nine-city rainfall trends |
+| `hurst_rainfall.Rmd` | Notebook: Hurst's rescaled range on nine cities' annual rainfall - how big a reservoir each would need |
+| `kaveri_rainfall.Rmd` | Notebook: Kaveri basin and dam-catchment rainfall |
+| `outputs/` | Rendered charts (committed) |
+| `data/`, `*_parquet/`, `sources/` | Built or downloaded data - gitignored, rebuilt by the scripts |
+| `blog-*.md`, `dev-log.md`, `CHANGELOG.md` | Write-ups and project history |
+
+The notebooks are meant to be run chunk by chunk in RStudio or Positron, after
+the data has been built; they are not knitted.
 
 ## What the scripts produce
 
@@ -45,8 +70,10 @@ uv pip install --python /Users/Karthik/envs/datascience/.venv/bin/python xarray 
 ```
 
 R side (lookup table + charts) needs `arrow`, `dplyr`, `lubridate`, `ggplot2`.
-The Kaveri analysis additionally uses `sf`, `duckdb`, `DBI`, `trend`, and
-`ggrepel`.
+The Kaveri and comfortable-days analyses additionally use `sf`, `duckdb`, `DBI`
+and `ggrepel` (Kaveri also uses `trend`). `explore_rainfall.Rmd` uses `ellmer`
+to have a model describe each city's rainfall trend, and needs `OPENAI_API_KEY`
+set in `.Renviron`.
 
 ## Run it
 
@@ -149,9 +176,20 @@ at least 8°C, and rainfall is under 15 mm (the top of IMD's "light rain" band).
 There is no humidity in the IMD data, so humid coasts look kinder than they feel.
 
 ```bash
-Rscript scripts/build_comfortable_days.R   # ~2 min
-Rscript scripts/map_comfortable_days.R
+# Needs rainfall_parquet/ and temperature_parquet/ (above), and the India state
+# boundaries in sources/boundaries/, which the Kaveri fetch script downloads.
+bash scripts/fetch_kaveri_geography.sh
+
+Rscript scripts/build_comfortable_days.R   # ~2 min, writes the daily flags
+Rscript scripts/map_comfortable_days.R     # the two maps
+Rscript scripts/plot_city_comfort_trends.R # the 12-city panels
 ```
+
+The rule was chosen to be India-specific. The US-style definition the idea came
+from (60-87°F high, dew point at most 60°F, cloud cover at most 50%) doesn't
+travel: in India a cloudy day is usually a relief, and IMD's gridded data has no
+humidity or cloud. So rain stands in for cloud, and the 30°C ceiling does some
+of humidity's work by screening out the muggy coasts.
 
 The build script writes `comfort_parquet/year=YYYY/`, one row per 0.25° rainfall
 cell per day, 1951-2025 (136M rows). Each rainfall cell takes the temperature of
@@ -162,9 +200,21 @@ any input is missing that day. It also writes `data/comfortable_days_annual.parq
 at the top of the script.
 
 The map script draws the 1995-2024 average and the change since 1951-1980 into
-`outputs/`, dropping cells missing more than 10% of days in a period.
+`outputs/`, clipped to India's official boundary (DataMeet state outlines via
+geoBoundaries), dropping cells missing more than 10% of days in a period.
 `scripts/plot_city_comfort_trends.R` plots yearly counts with a loess trend for
-12 of the largest cities.
+the largest cities (Census 2011 urban agglomerations; Nagpur replaces Lucknow,
+which shares Kanpur's 1° temperature cell).
+
+| Chart | Hard rule | Fuzzy score |
+|---|---|---|
+| Average, 1995-2024 | `outputs/comfortable_days_map.png` | `outputs/comfortable_days_map_fuzzy.png` |
+| Change since 1951-1980 | `outputs/comfortable_days_change_map.png` | `outputs/comfortable_days_change_map_fuzzy.png` |
+| City trends | `outputs/city_comfortable_days.png` | `outputs/city_comfortable_days_fuzzy.png` |
+
+![Change in comfortable days, 1995-2024 vs 1951-1980](outputs/comfortable_days_change_map.png)
+
+![Comfortable days a year in the largest cities, 1951-2024](outputs/city_comfortable_days.png)
 
 ### Fuzzy comfort score
 
@@ -182,6 +232,15 @@ Rscript scripts/plot_city_comfort_trends.R fuzzy
 ```
 
 These write the same charts with a `_fuzzy` suffix.
+
+Caveats specific to this analysis:
+
+- Temperature is on a 1° grid (~110 km), so hill stations blur into the plains
+  around them. Shillong's cell has a median high of 29°C; Kochi's cell takes in
+  the Western Ghats and scores far higher than the city would.
+- No humidity, so the humid coasts look kinder than they feel.
+- IMD's temperature coverage changes over time (some J&K, Arunachal and island
+  cells only from 1969), and its station count drops from 2008.
 
 ## Kaveri catchment analysis
 
@@ -205,13 +264,28 @@ for Harangi, Hemavathi, KRS, Kabini, Biligundlu, Mettur, Bhavanisagar, and
 Amaravathi. The second scans the year-partitioned rainfall Parquet with DuckDB
 and writes compact monthly and annual aggregates under `data/`.
 
-The external geometries, derived rainfall tables, and rendered charts remain
-untracked. See [`blog-post.md`](blog-post.md) for the findings and caveats.
+The external geometries and derived rainfall tables remain untracked; the
+rendered charts are in `outputs/kaveri_*.png`. See [`blog-post.md`](blog-post.md)
+for the findings and caveats.
+
+## Exploration and Hurst notebooks
+
+`explore_rainfall.Rmd` is the first look at the rainfall grid: coverage, the
+all-India monsoon curve with 2025 against the other 124 years, a century of
+annual totals, the 2025 rainfall map, and nine-city trends since 1951.
+
+`hurst_rainfall.Rmd` borrows Harold Edwin Hurst's question about the Nile - how
+much storage does it take to release the average every year - and applies the
+rescaled range (R/S) to nine cities' annual rainfall, 1951-2024. It reports the
+Hurst exponent and the storage needed in years of average rainfall. Pune's
+storage figure is driven by a strong trend in its cell rather than persistence,
+and is flagged as such in the notebook.
 
 ## Data & licensing
 
 The **code** in this repo is MIT (see `LICENSE`). The **data is not**, and is
-deliberately not committed here:
+deliberately not committed here. The charts in `outputs/` are aggregates
+derived from IMD data and carry IMD as their source.
 
 - **Rainfall** — © India Meteorological Department, Pune. High-resolution
   (0.25°) daily gridded rainfall, 1901–2024 (final) + 2025 (real-time /
@@ -219,9 +293,13 @@ deliberately not committed here:
   <https://www.imdpune.gov.in/cmpg/Griddata/Rainfall_25_NetCDF.html>. Use is
   subject to IMD's data-supply terms — check them before you redistribute
   anything derived from it.
+- **Temperature** — © India Meteorological Department, Pune. 1° daily gridded
+  minimum and maximum temperature, 1951–2025 (see the temperature section).
 - **Place names** — from [GeoNames](https://www.geonames.org/), licensed
   CC BY 4.0. The `IN.zip` / `admin1CodesASCII.txt` dumps are downloaded by you,
   not bundled here.
+- **State boundaries** — DataMeet India maps via geoBoundaries
+  (`IND-ADM1`), CC BY 2.5 IN, downloaded by `scripts/fetch_kaveri_geography.sh`.
 
 If you only want the code, you have it. If you want the data, the scripts fetch
 it for you.

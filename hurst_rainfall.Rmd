@@ -1,0 +1,335 @@
+---
+title: "Hurst's H on Indian city rainfall - how big a reservoir?"
+output: html_notebook
+---
+
+Harold Edwin Hurst spent decades on the Nile working out how big the Aswan
+reservoir had to be. His question: if you want to release the long-run average
+flow every year, how much water must you store to ride out the runs of dry and
+wet years? For a series of independent years the required storage grows like
+`sqrt(N)`. Hurst found the Nile grew faster - wet years clump with wet years,
+dry with dry - so you need a much bigger dam than randomness would suggest.
+
+He summarised this with the rescaled range. Take annual values, and the
+cumulative departure from the mean `Z_t = sum(x_i - xbar)`. The range
+`R = max(Z) - min(Z)` is exactly the storage a reservoir needs to guarantee
+the mean release over that window (the Rippl mass-curve argument). Divide by the
+standard deviation to get `R/S`, and `R/S ~ (a N)^H`. `H = 0.5` is a random
+series; `H > 0.5` is persistence. The Nile sits around 0.7.
+
+Two numbers per city here: `H` (the persistence exponent) and, more concretely,
+`R / mean` - how many years of average rainfall the reservoir must hold.
+
+```{r}
+require(tidyverse)
+require(arrow)
+
+ds <- open_dataset("rainfall_parquet")
+lookup <- read_parquet("cell_lookup.parquet")
+```
+
+Same nine cities as the other notebook, same cell lookup.
+
+```{r}
+tribble(
+  ~city       , ~pattern                  ,
+  "Delhi"     , "^(New )?Delhi$"          ,
+  "Mumbai"    , "^Mumbai$"                ,
+  "Kolkata"   , "^Kolkata$"               ,
+  "Chennai"   , "^Chennai$"               ,
+  "Bengaluru" , "^(Bengaluru|Bangalore)$" ,
+  "Hyderabad" , "^Hyderabad$"             ,
+  "Ahmedabad" , "^Ahmedabad$"             ,
+  "Pune"      , "^Pune$"                  ,
+  "Jaipur"    , "^Jaipur$"
+) -> city_patterns
+
+city_patterns %>%
+  mutate(
+    cell = map2(city, pattern, function(city, pattern) {
+      lookup %>%
+        filter(str_detect(name, regex(pattern, ignore_case = TRUE))) %>%
+        slice_max(population, n = 1, with_ties = FALSE) %>%
+        transmute(city = city, cell_lat, cell_lon)
+    })
+  ) %>%
+  select(cell) %>%
+  unnest(cell) -> city_cells
+
+city_cells
+```
+
+Annual total per city cell, 1951-2024. Post-1951 only (better gauge coverage),
+and drop 2025 - it's provisional and half-formed.
+
+```{r}
+ds %>%
+  filter(lat %in% city_cells$cell_lat, lon %in% city_cells$cell_lon) %>%
+  group_by(lat, lon, year) %>%
+  summarise(annual_mm = sum(rainfall_mm), .groups = "drop") %>%
+  collect() %>%
+  inner_join(city_cells, by = c("lat" = "cell_lat", "lon" = "cell_lon")) %>%
+  transmute(
+    city = factor(city, levels = city_patterns$city),
+    year,
+    annual_mm
+  ) %>%
+  filter(year > 1950, year < 2025) %>%
+  arrange(city, year) -> city_yearly
+
+city_yearly %>% summarise(n = n(), .by = city)
+```
+
+The core Hurst piece. `rs_range` is the storage number - range of the cumulative
+departure from the mean. Everything else is built on it.
+
+```{r}
+rs_range <- function(x) {
+  z <- cumsum(x - mean(x))
+  max(z) - min(z)
+}
+```
+
+Before any exponent, look at the actual mass curve. This is what Hurst was
+staring at. Bengaluru: cumulative departure from its own 1951-2024 mean. The
+reservoir has to span the gap between the highest and lowest point of this line.
+
+```{r}
+city_yearly %>%
+  filter(city == "Bengaluru") %>%
+  mutate(cum_dep = cumsum(annual_mm - mean(annual_mm))) -> blr_mass
+
+blr_mass %>%
+  summarise(
+    top = max(cum_dep),
+    bot = min(cum_dep),
+    top_yr = year[which.max(cum_dep)],
+    bot_yr = year[which.min(cum_dep)]
+  ) -> blr_R
+
+blr_mass %>%
+  ggplot(aes(year, cum_dep)) +
+  geom_hline(yintercept = 0, colour = "grey80") +
+  geom_line(colour = "#1b7a7a", linewidth = 0.8) +
+  annotate(
+    "segment",
+    x = 2028,
+    xend = 2028,
+    y = blr_R$bot,
+    yend = blr_R$top,
+    arrow = arrow(ends = "both", length = unit(0.15, "cm")),
+    colour = "grey40"
+  ) +
+  annotate(
+    "text",
+    x = 2030,
+    y = (blr_R$top + blr_R$bot) / 2,
+    label = paste0(
+      "R = ",
+      scales::comma(round(blr_R$top - blr_R$bot)),
+      " mm\n~ ",
+      round((blr_R$top - blr_R$bot) / mean(blr_mass$annual_mm), 1),
+      " years of\naverage rain"
+    ),
+    hjust = 0,
+    size = 3.2,
+    colour = "grey30",
+    lineheight = 0.95
+  ) +
+  scale_y_continuous(labels = scales::label_comma()) +
+  coord_cartesian(xlim = c(1951, 2045), clip = "off") +
+  labs(
+    title = "Bengaluru's rainfall mass curve, and the reservoir it implies",
+    subtitle = "Cumulative departure from the 1951-2024 mean; the dam must span top to bottom",
+    x = NULL,
+    y = "cumulative departure (mm)"
+  ) +
+  theme_minimal() +
+  theme(panel.grid.minor = element_blank(), plot.margin = margin(r = 60))
+```
+
+Before looking at cumulative departures, compare the annual totals directly.
+Each panel has its own horizontal mean line, so the year-to-year variability is
+visible without mixing cities with very different rainfall levels.
+
+```{r, fig.width=10, fig.height=8}
+city_yearly %>%
+  summarise(mean_mm = mean(annual_mm), .by = city) -> city_means
+
+city_yearly %>%
+  ggplot(aes(year, annual_mm)) +
+  geom_hline(
+    data = city_means,
+    aes(yintercept = mean_mm),
+    inherit.aes = FALSE,
+    colour = "#b5651d",
+    linetype = "dashed",
+    linewidth = 0.6
+  ) +
+  geom_line(colour = "grey55", linewidth = 0.5) +
+  geom_point(colour = "#1b7a7a", size = 0.8) +
+  facet_wrap(~city, ncol = 3, scales = "free_y") +
+  scale_y_continuous(labels = scales::label_comma()) +
+  labs(
+    title = "Annual rainfall for the nine cities",
+    subtitle = "Dashed line shows each city's 1951-2024 mean",
+    x = NULL,
+    y = "annual rainfall (mm)"
+  ) +
+  geom_smooth(method = 'loess', span = 0.2, linewidth = 0.6, se = F ) +
+  geom_smooth(method = 'lm', se = F, linewidth = 0.3, lty = 2)  +
+  theme_minimal() +
+  theme(
+    panel.grid.minor = element_blank(),
+    strip.text = element_text(face = "bold")
+  )
+```
+
+Now put the same mass curve beside the others. Each panel is centred on that
+city's own 1951-2024 mean, so the vertical span is directly comparable as the
+storage range `R` (though the panels use free y-scales so each city's shape stays
+readable).
+
+```{r, fig.width=10, fig.height=8}
+city_yearly %>%
+  group_by(city) %>%
+  arrange(year, .by_group = TRUE) %>%
+  mutate(cum_dep = cumsum(annual_mm - mean(annual_mm))) %>%
+  ungroup() -> city_mass
+
+city_mass %>%
+  ggplot(aes(year, cum_dep)) +
+  geom_hline(yintercept = 0, colour = "grey85") +
+  geom_line(colour = "#1b7a7a", linewidth = 0.6) +
+  facet_wrap(~city, ncol = 3, scales = "free_y") +
+  scale_y_continuous(labels = scales::label_comma()) +
+  labs(
+    title = "Rainfall mass curves for the nine cities",
+    subtitle = "Cumulative departure from each city's 1951-2024 mean; the top-to-bottom span is the implied storage range",
+    x = NULL,
+    y = "cumulative departure (mm)"
+  ) +
+  theme_minimal() +
+  theme(
+    panel.grid.minor = element_blank(),
+    strip.text = element_text(face = "bold")
+  )
+```
+
+The line drifts up for decades then down - that slow wander is persistence, and
+it's why the range is big. A coin-flip series would hug zero.
+
+Now the exponent. Classic R/S: split the series into non-overlapping windows of
+length `n`, average `R/S` within each `n`, and regress `log(R/S)` on `log(n)`.
+The slope is `H`.
+
+```{r}
+hurst_H <- function(x, ns = c(8, 10, 12, 16, 24, 36, 74)) {
+  ns <- ns[ns <= length(x)]
+  tibble(n = ns) %>%
+    mutate(
+      rs = map_dbl(n, function(n) {
+        k <- length(x) %/% n
+        map_dbl(seq_len(k), function(i) {
+          seg <- x[((i - 1) * n + 1):(i * n)]
+          rs_range(seg) / sd(seg)
+        }) %>%
+          mean()
+      })
+    )
+}
+```
+
+The log-log fit for a few cities, so the slope is visible rather than asserted.
+
+```{r}
+c("Bengaluru", "Kolkata", "Ahmedabad") %>%
+  set_names() %>%
+  map_df(
+    function(ct) {
+      city_yearly %>% filter(city == ct) %>% pull(annual_mm) %>% hurst_H()
+    },
+    .id = "city"
+  ) -> rs_fits
+
+rs_fits %>%
+  ggplot(aes(log(n), log(rs), colour = city)) +
+  geom_point(size = 2) +
+  geom_smooth(method = "lm", se = FALSE, linewidth = 0.7) +
+  scale_colour_manual(values = c("#1b7a7a", "#b5651d", "grey55")) +
+  labs(
+    title = "Rescaled range grows as a power of window length",
+    subtitle = "Slope of each line is that city's Hurst H",
+    x = "log(window length in years)",
+    y = "log(R/S)",
+    colour = NULL
+  ) +
+  theme_minimal() +
+  theme(panel.grid.minor = element_blank(), legend.position = "top")
+```
+
+Kolkata's line is steepest (most persistent), Ahmedabad's flattest (closest to a
+random series). Now compute both numbers for all nine.
+
+```{r}
+city_yearly %>%
+  summarise(
+    mean_mm = mean(annual_mm),
+    R_mm = rs_range(annual_mm),
+    store_years = R_mm / mean(annual_mm),
+    H = coef(lm(log(rs) ~ log(n), data = hurst_H(annual_mm)))[["log(n)"]],
+    .by = city
+  ) %>%
+  arrange(desc(store_years)) -> hurst_tbl
+
+hurst_tbl %>% mutate(across(where(is.numeric), ~ round(., 2)))
+```
+
+Pune's ~16 years of storage isn't real fractal persistence - that cell carries a
+strong monotonic trend over 1951-2024, and raw R/S reads any trend as extreme
+persistence (its H of 0.87 sits with the others, but the range is three times
+anyone else's). Flag it, don't trust its storage number. Everyone else lands in
+a believable band. On the shorter post-1951 record the exponents run high across
+the board - Bengaluru and Pune at 0.87, Kolkata 0.85, Delhi 0.83, Mumbai 0.80 -
+all well above the Nile's ~0.7, so wet and dry years genuinely clump. Hyderabad
+(0.52) and Ahmedabad (0.57) are closest to a memoryless coin-flip series.
+
+The concrete dam number, ranked. How many years of its own average rainfall each
+city would have to bank to always release the mean.
+
+```{r, fig.width=9, fig.height=6}
+hurst_tbl %>%
+  mutate(city = fct_reorder(city, store_years)) %>%
+  ggplot(aes(store_years, city)) +
+  geom_segment(
+    aes(x = 0, xend = store_years, yend = city),
+    colour = "grey80",
+    linewidth = 0.6
+  ) +
+  geom_point(aes(size = H), colour = "#1b7a7a") +
+  geom_text(
+    aes(
+      label = paste0(round(store_years, 1), " yrs  ", "(H=", round(H, 2), ")")
+    ),
+    hjust = -0.25,
+    size = 3.2,
+    colour = "grey30"
+  ) +
+  scale_size(range = c(2, 6), guide = "none") +
+  scale_x_continuous(expand = expansion(mult = c(0, 0.28))) +
+  labs(
+    title = "Delhi's rainfall would need the deepest reservoir",
+    subtitle = "Years of average rainfall to store for guaranteed mean release; dot size = Hurst H. Pune dropped (trend-driven outlier, 15.9 yrs)",
+    x = "storage required (years of mean rainfall)",
+    y = NULL
+  ) +
+  theme_minimal() +
+  theme(
+    panel.grid.minor = element_blank(),
+    panel.grid.major.y = element_blank()
+  )
+```
+
+Higher `H` and higher storage roughly track each other - persistence is what
+forces the big reservoir - but not perfectly, because storage also depends on how
+far the wet and dry runs actually swing, not just on the correlation structure.

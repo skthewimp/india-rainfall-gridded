@@ -3,10 +3,10 @@
 *.nc
 rainfall_parquet/
 temperature_parquet/
-# External hydrography/boundary downloads and local Kaveri derivatives
+# External hydrography/boundary downloads and derived tables (rebuilt by scripts)
 sources/
-data/kaveri_*
-outputs/
+data/
+comfort_parquet/
 # GeoNames dumps (CC BY 4.0 - download yourself)
 IN.txt
 IN.zip
@@ -15,10 +15,12 @@ admin1.txt
 *.parquet
 city_cell_mapping.parquet
 cell_lookup.parquet
-# Derived charts (aggregates of IMD data)
-*.png
+# Rendered charts in outputs/ ARE committed (aggregates of IMD data)
 
 # --- Environment / scratch ---
+.posit/
+.DS_Store
+Rplots.pdf
 .venv/
 __pycache__/
 page.html

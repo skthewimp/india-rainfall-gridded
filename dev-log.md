@@ -190,3 +190,115 @@ three scripts and rebuilds everything from the original sources.
 
 
 
+
+## 2026-10-11 to 2026-10-12 | Comfortable weather across India
+
+Built with Claude Code. Charts in `outputs/`, write-up in
+`blog-comfortable-weather.md`.
+
+### Prompts (in order, lightly edited)
+
+1. *"We have long term weather data (rainfall and temperature) for all India,
+   gridded, from 1951 onwards. Use that to produce a map of India like this one
+   [a South America map of days with comfortable weather]. Before you make the
+   map, discuss the approach. The definition of 'comfortable weather' needs to be
+   India specific. How will you get data for that?"*
+2. *"Ignore humidity for now. Do with what we have - temperature and rain, both
+   max and min temp. Max temp at 15-30; >30 is still hard. Is rain < 5 mm OK or
+   should we make it 10 mm?"*
+3. *"If IMD says 2.5-15 mm is light rain, keep 15 mm as the cutoff. 8° for min is
+   fine. No elevation adjustment - leave it at 1°. Let's discuss the max temp a
+   bit more."*
+4. *"Keep 30. Build now. Also, for each gridpoint, for each year, mark each day
+   comfortable or not, so we can do longitudinal analysis."*
+5. *"Commit and push"* (README and temperature script).
+6. *"Map is too boring. Use the RYG diverging scale like the original - it uses
+   some blue also."*
+7. *"Use the official India map, it must be somewhere on this computer. Where we
+   don't have data leave it white."* + *"Mark more large cities, maybe 20."*
+8. *"Do we need such a diverging scale or is green-yellow-red enough? Adjust the
+   scales to include both ends."*
+9. *"For India's 12 largest cities, draw comfortable days per year: year on x, a
+   dot per year, a loess line, panels in descending order of city size."*
+10. *"Swap Lucknow for Nagpur."* / *"Move the end labels away from the line."* /
+    *"Add lines between the panels so it's clear which label is for which city."*
+11. *"Next, a fuzzy map. Whether a day is comfortable is probabilistic - to get
+    around 30 being comfortable but 31 not. How do we model this? Produce it, and
+    produce both the map and the panelled chart."*
+12. *"All notebooks and outputs can be in git. Document properly, commit and
+    push, and update the devlog, changelog and blog."*
+
+### Decisions
+
+- **India-specific definition.** The source map used daily high 60-87°F, dew
+  point at most 60°F and cloud cover at most 50%. Cloud cover was dropped (a
+  cloudy day in India is usually welcome) and IMD has no humidity, so the rule
+  is: daily high 15-30°C, overnight low at least 8°C, rain under 15 mm.
+  - 30°C: India's median grid-cell daily high is 31-33°C, so the cap sits on the
+    steep part of the distribution (moving it to 32°C takes the cells clearing
+    150 days from 86 to 250 of 360). Kept at 30 because, without humidity data,
+    it is what screens out the muggy coasts - the 1° cell at 9.5°N, 76.5°E (just
+    south of Kochi) has 165 days a year between 30 and 32°C. The cost is a harsh penalty on the dry Deccan.
+  - 8°C night floor: 10°C halved Delhi's count (128 to 56) by removing its
+    best winter days; 5°C barely bit; 8°C drops the cold-wave weeks.
+  - 15 mm: the top of IMD's "light rain" band. Moving from 5 to 10 mm changed
+    city counts by only 2-12 days, so this choice matters little.
+- **Humidity via ERA5-Land was discussed and deferred.** It would add dew point
+  at 0.1°, but needs a Copernicus account. Elevation downscaling of the 1°
+  temperature grid (lapse rate) was also discussed and rejected - stay at 1°.
+- **Output grain is the 0.25° rainfall cell.** Each takes the temperature of the
+  1° cell it sits in. 60 coastal/border rainfall cells have no 1° cell over them
+  and take the nearest one, flagged `temp_from_neighbour`. Key `(date, lat, lon)`
+  checked unique; row count checked equal to the rainfall table.
+- **Missing data stays missing.** `comfortable` is NULL when inputs are missing;
+  annual counts carry `observed_days` so period averages rescale rather than
+  undercount. Maps drop cells missing more than 10% of days in a period.
+- **Fuzzy score.** Each threshold becomes a logistic curve that is 0.5 at the
+  hard cut-off; the day's score is the product of the four (independent
+  thresholds). Widths: 1°C on the hot side of the daily high (28°C ~ 0.88, 32°C
+  ~ 0.12), 1.5°C on the cold sides, 0.4 on log-mm for rain (7 mm ~ 0.87, 30 mm ~
+  0.15). Read as the share of people whose cut-offs the day clears; summed, it
+  gives expected comfortable days, and reduces to the hard count as widths go to
+  zero. Widths are judgement calls, not fitted.
+- **Maps.** Red-yellow-green (ColorBrewer RdYlGn), green = more comfortable,
+  legend spanning the data range. The change map is rust-teal diverging around
+  zero with a symmetric midpoint, so the smaller gains side never reaches full
+  teal. Cells are clipped to the DataMeet state outlines (via geoBoundaries),
+  which follow India's official boundary - Ladakh includes Gilgit-Baltistan and
+  Aksai Chin. No Survey of India file was found on disk.
+- **City panels.** Census 2011 urban agglomerations, largest first. Lucknow
+  shares Kanpur's 1° temperature cell, so Nagpur (13th) replaces it. Shared y
+  axis, city name inside a boxed panel, loess ends labelled.
+
+### Findings
+
+- Typical grid cell: about 90 comfortable days a year (1995-2024). The most
+  comfortable areas are the Himalaya, the north-east, and south Karnataka into
+  the Kerala highlands; the fewest are Tamil Nadu, Telangana and the Gujarat
+  coast.
+- 76% of comparable cells lost comfortable days between 1951-80 and 1995-2024.
+  The Deccan lost 30-40 a year; in a Deccan box, days above 30°C rose from 238
+  to 274 a year. The north-west gained a little (Jaipur +15, Delhi +10) because
+  nights under 8°C fell from 54 to 41 a year.
+- City trends 1951 to 2024 (hard): Bengaluru 231 to 155, Hyderabad 101 to 54,
+  Chennai 75 to 26. Fuzzy: Bengaluru 210 to 148, Chennai 73 to 40, Hyderabad 104
+  to 70. Fuzzy and hard maps correlate at 0.99.
+
+### Problems solved
+
+- DuckDB in R refused a prepared parameter inside `CREATE VIEW`; switched to
+  `sprintf()` for that one integer.
+- `sum()` and `count_if()` over all-NULL groups return NULL in DuckDB, which
+  made some cell-years NA. Fixed with `count(*) FILTER (WHERE comfortable)` and
+  `coalesce(sum(comfort_score), 0)`.
+- The hard flag and fuzzy score have different missingness (SQL `FALSE AND NULL`
+  is FALSE, but arithmetic with NULL is NULL), so the score got its own
+  denominator, `score_observed_days`.
+- The state outline was drawn in white on a white background, so it was
+  invisible; added a grey country outline and a white India fill underneath.
+- Hairline seams between clipped grid squares: outline each square in its own
+  fill colour.
+- `ggrepel` 0.9.8 ignores `label.size` for the box border; it reads the
+  `linewidth` aesthetic, so set `linewidth = 0`.
+- City names placed at a data x-coordinate widened the x-scale; fixed x limits
+  so names and end labels fit without moving the data.

@@ -7,7 +7,6 @@ output: html_notebook
 require(tidyverse)
 require(arrow)
 require(lubridate)
-require(trend)
 require(ggrepel)
 ```
 
@@ -15,11 +14,12 @@ What exactly are we measuring?
 
 - A year means a calendar year. We can add the June-May water year later.
 - "Rainfall in the catchment" means area-weighted rainfall depth in mm. It is
-  also converted to km3 falling over that area. It is not reservoir inflow.
+  also converted to volume falling over that area, shown as TMCFT in the plots.
+  It is not reservoir inflow.
 - The CWC boundary defines the whole basin. HydroBASINS topology defines land
   upstream of each dam or gauge, so tributaries are included automatically.
-- The main trend window is 1951-2024. The early IMD grid has a large pre-1951
-  break in the Kabini/Western Ghats cells; 2025 is provisional.
+- The main comparison window is 1951-2024. The early IMD grid has a large
+  pre-1951 break in the Kabini/Western Ghats cells; 2025 is provisional.
 
 First look at the geography and the cells.
 
@@ -35,8 +35,10 @@ zone_summary <- read_csv(
   show_col_types = FALSE
 )
 
-monthly <- read_parquet("data/kaveri_rainfall_monthly.parquet")
-annual <- read_parquet("data/kaveri_rainfall_annual.parquet")
+monthly <- read_parquet("data/kaveri_rainfall_monthly.parquet") %>%
+  mutate(rainfall_tmcft = rainfall_km3 * 35.3146667)
+annual <- read_parquet("data/kaveri_rainfall_annual.parquet") %>%
+  mutate(rainfall_tmcft = rainfall_km3 * 35.3146667)
 
 zone_summary %>%
   select(zone, zone_area_km2, cells, grid_coverage_pct)
@@ -46,7 +48,7 @@ The whole CWC basin uses 153 IMD cells and has 99.4% grid-area coverage. All
 checkpoint catchments have effectively complete coverage. Every annual row has
 12 months and either 365 or 366 observed days.
 
-## Has rainfall shifted since 1951?
+## What is the annual rainfall across the Kaveri catchment?
 
 ```{r}
 zone_order <- c(
@@ -74,123 +76,38 @@ zone_labels <- c(
   upstream_bhavanisagar = "Upstream of Bhavanisagar",
   upstream_amaravathi = "Upstream of Amaravathi"
 )
-
-trend_stats <- annual %>%
-  filter(year >= 1951, year <= 2024) %>%
-  group_by(zone_id, zone) %>%
-  group_modify(function(d, key) {
-    sen <- trend::sens.slope(d$rainfall_mm)
-    mk <- trend::mk.test(d$rainfall_mm)
-
-    tibble(
-      mean_mm = mean(d$rainfall_mm),
-      sd_mm = sd(d$rainfall_mm),
-      cv = sd_mm / mean_mm,
-      sen_mm_decade = unname(sen$estimates) * 10,
-      mann_kendall_p = mk$p.value
-    )
-  }) %>%
-  ungroup()
-
-period_change <- annual %>%
-  filter(year %in% c(1951:1980, 1995:2024)) %>%
-  mutate(period = if_else(year <= 1980, "1951-1980", "1995-2024")) %>%
-  summarise(period_mean_mm = mean(rainfall_mm), .by = c(zone_id, period)) %>%
-  pivot_wider(names_from = period, values_from = period_mean_mm) %>%
-  mutate(
-    change_mm = `1995-2024` - `1951-1980`,
-    change_pct = 100 * change_mm / `1951-1980`
-  )
-
-trend_summary <- trend_stats %>%
-  left_join(period_change, by = "zone_id") %>%
-  mutate(
-    zone_short = unname(zone_labels[zone_id]),
-    zone_id = factor(zone_id, levels = zone_order)
-  ) %>%
-  arrange(zone_id)
-
-trend_summary %>%
-  transmute(
-    zone = zone_short,
-    mean_mm = round(mean_mm),
-    sen_mm_decade = round(sen_mm_decade, 1),
-    mann_kendall_p = round(mann_kendall_p, 3),
-    recent_vs_early_pct = round(change_pct, 1)
-  )
 ```
 
-```{r}
-write_csv(
-  trend_summary %>%
-    select(
-      zone_id, zone_short, mean_mm, sd_mm, cv,
-      sen_mm_decade, mann_kendall_p,
-      `1951-1980`, `1995-2024`, change_mm, change_pct
-    ),
-  "data/kaveri_trend_summary.csv"
-)
-```
-
-The whole basin's recent 30-year average is 5% above 1951-80. That average
-hides a split: KRS and Karnataka are about 12% higher, while Bhavanisagar is
-13% lower and Kabini 7% lower.
+The annual series keeps the year-to-year variation visible. The open point marks
+provisional 2025 data.
 
 ```{r, fig.width=10, fig.height=9}
 annual_plot <- annual %>%
   filter(year >= 1951) %>%
+  mutate(zone_id = factor(zone_id, levels = zone_order)) %>%
+  group_by(zone_id) %>%
   mutate(
-    zone_short = unname(zone_labels[zone_id]),
-    zone_id = factor(zone_id, levels = zone_order)
-  ) %>%
-  left_join(
-    trend_summary %>%
-      transmute(
-        zone_id,
-        facet_label = paste0(
-          zone_short,
-          " · ",
-          scales::number(change_pct, accuracy = 0.1, scale_cut = NULL, prefix = if_else(change_pct > 0, "+", "")),
-          "% recent vs early"
-        )
-      ),
-    by = "zone_id"
-  ) %>%
-  arrange(zone_id, year) %>%
-  group_by(zone_id, facet_label) %>%
-  mutate(
-    rolling_11yr = as.numeric(
-      stats::filter(rainfall_mm, rep(1 / 11, 11), sides = 1)
+    average_annual_tmcft = mean(rainfall_tmcft[year <= 2024]),
+    facet_label = paste0(
+      unname(zone_labels[as.character(zone_id)]),
+      " · average ",
+      round(average_annual_tmcft, 1),
+      " TMCFT/year"
     )
   ) %>%
   ungroup() %>%
   mutate(
     facet_label = factor(
       facet_label,
-      levels = trend_summary %>%
-        transmute(
-          label = paste0(
-            zone_short,
-            " · ",
-            scales::number(change_pct, accuracy = 0.1, scale_cut = NULL, prefix = if_else(change_pct > 0, "+", "")),
-            "% recent vs early"
-          )
-        ) %>%
-        pull(label)
+      levels = unique(facet_label[order(zone_id)])
     )
-  )
+  ) %>%
+  arrange(zone_id, year)
 
 annual_plot %>%
-  filter(year <= 2024) %>%
-  ggplot(aes(year, rainfall_mm)) +
-  geom_line(colour = "grey72", linewidth = 0.35) +
-  geom_point(colour = "grey48", size = 0.65) +
-  geom_line(
-    aes(y = rolling_11yr),
-    colour = "#176d6e",
-    linewidth = 0.9,
-    na.rm = TRUE
-  ) +
+  ggplot(aes(year, rainfall_tmcft)) +
+  geom_line(colour = "grey68", linewidth = 0.4) +
+  geom_point(colour = "grey45", size = 0.65) +
   geom_point(
     data = annual_plot %>% filter(year == 2025),
     shape = 21,
@@ -203,11 +120,11 @@ annual_plot %>%
   scale_x_continuous(breaks = seq(1960, 2020, 20)) +
   scale_y_continuous(labels = scales::label_comma()) +
   labs(
-    title = "Kaveri rainfall has edged up, but its tributaries diverge",
-    subtitle = "Annual totals and trailing 11-year means, 1951-2024. Panel scales vary; open point is provisional 2025.",
+    title = "Annual rainfall across the Kaveri catchment",
+    subtitle = "Yearly rainfall totals, 1951-2024. Panel scales vary; open point is provisional 2025.",
     x = NULL,
-    y = "annual rainfall (mm)",
-    caption = "Recent vs early compares 1995-2024 with 1951-1980. Rainfall is area-weighted over each catchment; it is not river inflow. Source: IMD 0.25° daily grid."
+    y = "annual rainfall (TMCFT)",
+    caption = "Rainfall is area-weighted over each catchment; it is not river inflow. Source: IMD 0.25° daily grid."
   ) +
   theme_minimal(base_size = 10) +
   theme(
@@ -218,75 +135,9 @@ annual_plot %>%
     plot.subtitle = element_text(colour = "grey35", margin = margin(b = 8)),
     plot.caption = element_text(colour = "grey45", hjust = 0, size = 7.5),
     plot.margin = margin(12, 18, 12, 12)
-  ) -> annual_chart
-
-ggsave(
-  "outputs/kaveri_annual_rainfall_trends.png",
-  annual_chart,
-  width = 10,
-  height = 9,
-  dpi = 180,
-  bg = "white"
-)
+  )
 ```
 
-The same result is easier to compare as one ranked change chart.
-
-```{r, fig.width=9, fig.height=6}
-trend_summary %>%
-  mutate(
-    zone_short = fct_reorder(zone_short, change_pct),
-    direction = if_else(change_pct >= 0, "higher", "lower"),
-    label = paste0(
-      if_else(change_pct > 0, "+", ""),
-      round(change_pct, 1),
-      "%"
-    )
-  ) %>%
-  ggplot(aes(change_pct, zone_short, fill = direction)) +
-  geom_vline(xintercept = 0, colour = "grey65", linewidth = 0.4) +
-  geom_col(width = 0.62) +
-  geom_text(
-    aes(
-      label = label,
-      hjust = if_else(change_pct >= 0, -0.15, 1.15)
-    ),
-    colour = "grey15",
-    size = 3.2
-  ) +
-  scale_fill_manual(values = c(higher = "#176d6e", lower = "#bd7b55"), guide = "none") +
-  scale_x_continuous(
-    labels = scales::label_percent(scale = 1),
-    limits = c(-16, 17),
-    breaks = seq(-15, 15, 5)
-  ) +
-  labs(
-    title = "Recent rainfall is higher around KRS, lower in Bhavani and Kabini",
-    subtitle = "Difference between the 1995-2024 and 1951-1980 annual averages",
-    x = NULL,
-    y = NULL,
-    caption = "Descriptive period comparison, not a causal or runoff estimate. Source: IMD 0.25° daily grid; area-weighted to CWC/HydroBASINS catchments."
-  ) +
-  theme_minimal(base_size = 11) +
-  theme(
-    panel.grid.major.y = element_blank(),
-    panel.grid.minor = element_blank(),
-    axis.text.y = element_text(colour = "grey20"),
-    plot.title = element_text(face = "bold", size = 15),
-    plot.subtitle = element_text(colour = "grey35", margin = margin(b = 8)),
-    plot.caption = element_text(colour = "grey45", hjust = 0, size = 7.5),
-    plot.margin = margin(12, 28, 12, 12)
-  ) -> change_chart
-
-ggsave(
-  "outputs/kaveri_recent_vs_early_rainfall.png",
-  change_chart,
-  width = 9,
-  height = 6,
-  dpi = 180,
-  bg = "white"
-)
-```
 
 ## When does each part get its rain?
 
@@ -294,13 +145,13 @@ ggsave(
 monthly_volume <- monthly %>%
   filter(year >= 1951, year <= 2024) %>%
   summarise(
-    mean_km3 = mean(rainfall_km3),
+    mean_tmcft = mean(rainfall_tmcft),
     .by = c(zone_id, zone, month)
   ) %>%
   group_by(zone_id) %>%
   mutate(
-    annual_mean_km3 = sum(mean_km3),
-    peak = mean_km3 == max(mean_km3),
+    annual_mean_tmcft = sum(mean_tmcft),
+    peak = mean_tmcft == max(mean_tmcft),
     zone_short = unname(zone_labels[zone_id])
   ) %>%
   ungroup() %>%
@@ -310,147 +161,53 @@ monthly_volume <- monthly %>%
   )
 ```
 
-Rainfall depth is useful for comparing how wet two catchments are. It is not
-additive. For cumulative checkpoints, use the total volume of rain falling over
-the upstream area.
+For cumulative checkpoints, use the total volume of rain falling over the
+upstream area. Volumes are reported in TMCFT throughout this section.
 
 ```{r}
-mainstem_order <- c(
-  "upstream_krs",
-  "upstream_biligundlu",
-  "upstream_mettur",
-  "whole_basin"
-)
-
-mainstem_summary <- monthly_volume %>%
-  filter(as.character(zone_id) %in% mainstem_order) %>%
-  distinct(zone_id, zone_short, annual_mean_km3) %>%
-  mutate(zone_id = factor(as.character(zone_id), levels = mainstem_order)) %>%
-  arrange(zone_id)
-
-mainstem_summary %>%
+monthly_volume %>%
+  filter(as.character(zone_id) %in% zone_order) %>%
+  distinct(zone_id, zone_short, annual_mean_tmcft) %>%
+  mutate(zone_id = factor(as.character(zone_id), levels = zone_order)) %>%
+  arrange(zone_id) %>%
   transmute(
     checkpoint = zone_short,
-    gross_rainfall_km3_year = round(annual_mean_km3, 1)
+    gross_rainfall_tmcft_year = round(annual_mean_tmcft, 1)
   )
 ```
 
-The cumulative main-stem sequence now behaves as it should: about 11.9 km³ of
-rain falls upstream of KRS each year, rising to 35.8 at Biligundlu, 40.5 at
-Mettur, and 81.7 across the whole basin.
+The volume comparison includes every checkpoint. The whole-basin and downstream
+main-stem checkpoints are cumulative upstream areas; the branch checkpoints are
+separate upstream catchments, so their volumes should not be added together.
 
-```{r, fig.width=10, fig.height=6}
-mainstem_monthly <- monthly_volume %>%
-  filter(as.character(zone_id) %in% mainstem_order) %>%
+```{r, fig.width=10, fig.height=8}
+checkpoint_monthly <- monthly_volume %>%
+  filter(as.character(zone_id) %in% zone_order) %>%
   mutate(
-    zone_id = factor(as.character(zone_id), levels = mainstem_order),
-    series_label = paste0(
-      zone_short,
-      " · ",
-      round(annual_mean_km3, 1),
-      " km³/year"
-    )
-  )
-
-mainstem_endpoints <- mainstem_monthly %>%
-  filter(month == 12)
-
-mainstem_monthly %>%
-  ggplot(aes(month, mean_km3, colour = zone_id, group = zone_id)) +
-  geom_line(linewidth = 0.9) +
-  geom_point(size = 1.7) +
-  geom_text_repel(
-    data = mainstem_endpoints,
-    aes(label = series_label),
-    direction = "y",
-    hjust = 0,
-    nudge_x = 0.45,
-    min.segment.length = 0,
-    segment.colour = "grey65",
-    segment.size = 0.25,
-    size = 3.1,
-    seed = 42,
-    show.legend = FALSE
-  ) +
-  scale_colour_manual(
-    values = c("#9cbcbc", "#679b99", "#397f7d", "#175f60"),
-    guide = "none"
-  ) +
-  scale_x_continuous(
-    breaks = c(1, 4, 7, 10, 12),
-    labels = month.abb[c(1, 4, 7, 10, 12)],
-    limits = c(1, 14.8)
-  ) +
-  scale_y_continuous(
-    labels = scales::label_number(accuracy = 0.1),
-    expand = expansion(mult = c(0, 0.08))
-  ) +
-  labs(
-    title = "Rainfall volume accumulates downstream",
-    subtitle = "Average gross rainfall over nested upstream areas, 1951-2024",
-    x = NULL,
-    y = "mean monthly rainfall volume (km³)",
-    caption = "KRS → Biligundlu → Mettur are cumulative main-stem checkpoints. Volume is rainfall over land, not reservoir inflow. Source: IMD 0.25° daily grid."
-  ) +
-  theme_minimal(base_size = 11) +
-  theme(
-    panel.grid.minor = element_blank(),
-    panel.grid.major.x = element_blank(),
-    plot.title = element_text(face = "bold", size = 15),
-    plot.subtitle = element_text(colour = "grey35", margin = margin(b = 8)),
-    plot.caption = element_text(colour = "grey45", hjust = 0, size = 7.5),
-    plot.margin = margin(12, 110, 12, 12)
-  ) -> mainstem_monthly_chart
-
-ggsave(
-  "outputs/kaveri_monthly_rainfall_climatology.png",
-  mainstem_monthly_chart,
-  width = 10,
-  height = 6,
-  dpi = 180,
-  bg = "white"
-)
-```
-
-Harangi, Hemavathi, Kabini, Bhavanisagar and Amaravathi are tributary branches,
-not successive downstream checkpoints. Their volumes should be read separately.
-
-```{r, fig.width=10, fig.height=6.5}
-tributary_order <- c(
-  "upstream_harangi",
-  "upstream_hemavathi",
-  "upstream_kabini",
-  "upstream_bhavanisagar",
-  "upstream_amaravathi"
-)
-
-tributary_monthly <- monthly_volume %>%
-  filter(as.character(zone_id) %in% tributary_order) %>%
-  mutate(
-    zone_id = factor(as.character(zone_id), levels = tributary_order),
+    zone_id = factor(as.character(zone_id), levels = zone_order),
     facet_label = paste0(
       zone_short,
       " · ",
-      round(annual_mean_km3, 1),
-      " km³/year"
+      round(annual_mean_tmcft, 1),
+      " TMCFT/year"
     )
   )
 
-tributary_facet_levels <- tributary_monthly %>%
+checkpoint_facet_levels <- checkpoint_monthly %>%
   distinct(zone_id, facet_label) %>%
   arrange(zone_id) %>%
   pull(facet_label)
 
-tributary_monthly <- tributary_monthly %>%
+checkpoint_monthly <- checkpoint_monthly %>%
   mutate(
     facet_label = factor(
       facet_label,
-      levels = tributary_facet_levels
+      levels = checkpoint_facet_levels
     )
   )
 
-tributary_monthly %>%
-  ggplot(aes(month_label, mean_km3, fill = peak)) +
+checkpoint_monthly %>%
+  ggplot(aes(month_label, mean_tmcft, fill = peak)) +
   geom_col(width = 0.75) +
   facet_wrap(vars(facet_label), ncol = 3) +
   scale_fill_manual(
@@ -459,16 +216,15 @@ tributary_monthly %>%
   ) +
   scale_x_discrete(breaks = month.abb[c(1, 4, 7, 10)]) +
   scale_y_continuous(
-    limits = c(0, 1),
     labels = scales::label_number(accuracy = 0.1),
     expand = expansion(mult = c(0, 0.08))
   ) +
   labs(
-    title = "Tributary reservoirs sit on separate branches",
+    title = "Rainfall volume across the checkpoints",
     subtitle = "Average monthly gross rainfall over each upstream catchment, 1951-2024; shared scale",
     x = NULL,
-    y = "mean monthly rainfall volume (km³)",
-    caption = "Peak month highlighted. These five catchments are not a downstream sequence. Source: IMD 0.25° daily grid."
+    y = "mean monthly rainfall volume (TMCFT)",
+    caption = "Peak month highlighted. Main-stem checkpoints are cumulative; branch checkpoints are separate catchments. Volume is rainfall over land, not reservoir inflow. Source: IMD 0.25° daily grid."
   ) +
   theme_minimal(base_size = 10) +
   theme(
@@ -479,16 +235,7 @@ tributary_monthly %>%
     plot.subtitle = element_text(colour = "grey35", margin = margin(b = 8)),
     plot.caption = element_text(colour = "grey45", hjust = 0, size = 7.5),
     plot.margin = margin(12, 18, 12, 12)
-  ) -> tributary_monthly_chart
-
-ggsave(
-  "outputs/kaveri_tributary_monthly_rainfall.png",
-  tributary_monthly_chart,
-  width = 10,
-  height = 6.5,
-  dpi = 180,
-  bg = "white"
-)
+  )
 ```
 
 What this still does not answer: how much reaches a reservoir. That needs

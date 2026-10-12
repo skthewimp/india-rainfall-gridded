@@ -1,0 +1,532 @@
+---
+title: "India gridded rainfall - poking around"
+output: html_notebook
+---
+
+IMD 0.25 deg daily rainfall, 1901-2025. Grain is cell-day (~4,964 land cells).
+Big file, so keep the heavy summarising inside arrow and only `collect()` the
+small results.
+
+```{r}
+require(tidyverse)
+require(arrow)
+
+require(ellmer)
+
+if (!nzchar(Sys.getenv("OPENAI_API_KEY"))) {
+  stop("Set OPENAI_API_KEY in .Renviron, restart R, then rerun.")
+}
+
+ds <- open_dataset("rainfall_parquet")
+ds
+```
+
+What does coverage actually look like?
+
+```{r}
+ds %>%
+  summarise(
+    rows = n(),
+    start = min(date),
+    end = max(date),
+    cells = n_distinct(paste(lat, lon))
+  ) %>%
+  collect()
+```
+
+All-India daily mean = average rainfall across every land cell on a given day.
+That's the number that should trace out the monsoon.
+
+```{r}
+ds %>%
+  group_by(year, date) %>%
+  summarise(mean_mm = mean(rainfall_mm), .groups = "drop") %>%
+  collect() %>%
+  mutate(date = as.Date(date)) -> daily
+```
+
+Overlay every year on a day-of-year axis, highlight 2025 against the other 124.
+
+```{r}
+daily %>%
+  mutate(
+    doy = yday(date),
+    this_year = year == 2025
+  ) %>%
+  ggplot(aes(doy, mean_mm, group = year)) +
+  geom_line(aes(colour = this_year, linewidth = this_year), alpha = 0.6) +
+  scale_colour_manual(values = c("grey80", "#1b7a7a")) +
+  scale_linewidth_manual(values = c(0.2, 0.7)) +
+  annotate(
+    "text",
+    x = 200,
+    y = Inf,
+    label = "2025",
+    vjust = 1.5,
+    colour = "#1b7a7a",
+    fontface = "bold"
+  ) +
+  labs(
+    title = "2025 sits inside the usual monsoon envelope",
+    x = "day of year",
+    y = "all-India mean mm/day"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "none", panel.grid.minor = element_blank())
+```
+
+Is India getting wetter over 125 years? Sum the daily mean within each year to
+get an annual accumulation for the average cell.
+
+```{r}
+daily %>%
+  summarise(annual_mm = sum(mean_mm), .by = year) %>%
+  ggplot(aes(year, annual_mm)) +
+  geom_line(colour = "grey70") +
+  geom_point(size = 0.6, colour = "grey40") +
+  geom_smooth(se = FALSE, colour = "#1b7a7a", linewidth = 0.8) +
+  labs(
+    title = "No obvious long-run trend in all-India annual rainfall",
+    x = NULL,
+    y = "annual mm (avg cell)"
+  ) +
+  theme_minimal() +
+  theme(panel.grid.minor = element_blank())
+```
+
+The all-India average hides everything interesting. Pick one place. Grab its
+cell from the lookup.
+
+```{r}
+lookup <- read_parquet("cell_lookup.parquet")
+
+lookup %>%
+  filter(str_detect(name, "Bengaluru|Bangalore")) %>%
+  arrange(desc(population)) %>%
+  head(3)
+```
+
+```{r}
+blr <- lookup %>%
+  filter(str_detect(name, "Bengaluru|Bangalore")) %>%
+  slice_max(population, n = 1)
+
+ds %>%
+  filter(abs(lat - blr$cell_lat) < 0.01, abs(lon - blr$cell_lon) < 0.01) %>%
+  collect() %>%
+  mutate(date = as.Date(date), doy = yday(date), yr = year(date)) -> blr_rain
+```
+
+Median day-of-year rainfall for that cell - when does its monsoon show up?
+
+```{r}
+blr_rain %>%
+  summarise(med_mm = median(rainfall_mm), .by = doy) %>%
+  ggplot(aes(doy, med_mm)) +
+  geom_col(fill = "#1b7a7a", width = 1) +
+  labs(
+    title = paste0(
+      blr$name,
+      ": median daily rainfall by day of year (1901-2025)"
+    ),
+    x = "day of year",
+    y = "median mm"
+  ) +
+  theme_minimal() +
+  theme(panel.grid.minor = element_blank())
+```
+
+Back to the whole map: where did it actually rain in 2025? Annual total per cell.
+
+```{r}
+ds %>%
+  filter(year == 2025) %>%
+  group_by(lat, lon) %>%
+  summarise(annual_mm = sum(rainfall_mm), .groups = "drop") %>%
+  collect() -> map2025
+
+map2025 %>%
+  ggplot(aes(lon, lat, fill = annual_mm)) +
+  geom_tile() +
+  scale_fill_viridis_c(option = "mako", direction = -1, name = "mm") +
+  coord_quickmap() +
+  labs(
+    title = "2025 rainfall: the Western Ghats and Northeast light up",
+    x = NULL,
+    y = NULL
+  ) +
+  theme_minimal() +
+  theme(panel.grid = element_blank())
+```
+
+
+How has Bengaluru rainfall moved over the years? Annual totals are noisy, so
+keep the individual years but add a broad trend.
+
+```{r}
+blr_rain %>%
+  summarise(annual_mm = sum(rainfall_mm), .by = year) -> blr_yearly
+
+blr_yearly %>%
+  filter(annual_mm %in% range(annual_mm)) %>%
+  mutate(
+    note = if_else(annual_mm == max(annual_mm), "Wettest", "Driest"),
+    label = paste0(
+      note,
+      "\n",
+      year,
+      " · ",
+      scales::comma(round(annual_mm)),
+      " mm"
+    )
+  ) -> blr_extremes
+
+blr_yearly %>%
+  ggplot(aes(year, annual_mm)) +
+  geom_line(colour = "grey75", linewidth = 0.4) +
+  geom_point(colour = "grey40", size = 0.9) +
+  geom_smooth(se = FALSE, colour = "#1b7a7a", linewidth = 0.8) +
+  geom_point(data = blr_extremes, colour = "#1b7a7a", size = 2) +
+  geom_text(
+    data = blr_extremes,
+    aes(label = label, vjust = if_else(note == "Wettest", -0.7, 1.5)),
+    colour = "#1b7a7a",
+    fontface = "bold",
+    size = 3.2,
+    lineheight = 0.9,
+    show.legend = FALSE
+  ) +
+  scale_y_continuous(
+    labels = scales::label_comma(),
+    expand = expansion(mult = c(0.1, 0.16))
+  ) +
+  labs(
+    title = "Bengaluru's annual rainfall, 1901-2025",
+    subtitle = "Annual total at the nearest 0.25° grid cell",
+    x = NULL,
+    y = "annual rainfall (mm)"
+  ) +
+  theme_minimal() +
+  theme(panel.grid.minor = element_blank())
+```
+
+What about the big cities together? Nine gives us a clean 3 x 3, and Bengaluru
+can stay in the comparison rather than sitting off on its own.
+
+```{r}
+tribble(
+  ~city       , ~pattern                  ,
+  "Delhi"     , "^(New )?Delhi$"          ,
+  "Mumbai"    , "^Mumbai$"                ,
+  "Kolkata"   , "^Kolkata$"               ,
+  "Chennai"   , "^Chennai$"               ,
+  "Bengaluru" , "^(Bengaluru|Bangalore)$" ,
+  "Hyderabad" , "^Hyderabad$"             ,
+  "Ahmedabad" , "^Ahmedabad$"             ,
+  "Pune"      , "^Pune$"                  ,
+  "Jaipur"    , "^Jaipur$"
+) -> city_patterns
+
+city_patterns %>%
+  mutate(
+    cell = map2(city, pattern, function(city, pattern) {
+      lookup %>%
+        filter(str_detect(name, regex(pattern, ignore_case = TRUE))) %>%
+        slice_max(population, n = 1, with_ties = FALSE) %>%
+        transmute(city = city, cell_lat, cell_lon)
+    })
+  ) %>%
+  select(cell) %>%
+  unnest(cell) -> city_cells
+
+city_cells
+```
+
+Do the expensive annual sum before collecting. The separate latitude/longitude
+filters may admit a few crossed cells; the exact join removes them afterwards.
+
+```{r}
+ds %>%
+  filter(
+    lat %in% city_cells$cell_lat,
+    lon %in% city_cells$cell_lon
+  ) %>%
+  group_by(lat, lon, year) %>%
+  summarise(annual_mm = sum(rainfall_mm), .groups = "drop") %>%
+  collect() %>%
+  inner_join(
+    city_cells,
+    by = c("lat" = "cell_lat", "lon" = "cell_lon")
+  ) %>%
+  transmute(
+    city = factor(city, levels = city_patterns$city),
+    year,
+    annual_mm
+  ) -> city_yearly
+```
+
+A straight slope is too crude here. Give the model five-year means and ask it
+to describe the shape: rises, falls, plateaus, reversals, and the recent move.
+One call for all nine cities.
+
+```{r, fig.width=14, fig.height=12, out.width='100%'}
+city_yearly %>%
+  mutate(period_start = 1901 + 5 * ((year - 1901) %/% 5)) %>%
+  summarise(
+    mean_mm = round(mean(annual_mm)),
+    .by = c(city, period_start)
+  ) %>%
+  arrange(city, period_start) -> city_trend_input
+
+paste(
+  "Describe the long-run rainfall shape for each Indian city below.",
+  "The values are five-year means of annual rainfall in millimetres.",
+  "Focus on multi-decade rises, falls, plateaus, reversals, and recent direction.",
+  "Do not reduce the series to one slope. Do not claim significance or causation.",
+  "Write one plain-English sentence per city, at most 12 words.",
+  paste(
+    capture.output(write.csv(city_trend_input, row.names = FALSE)),
+    collapse = "\n"
+  ),
+  sep = "\n"
+) -> trend_prompt
+
+ellmer::type_array(
+  ellmer::type_object(
+    city = ellmer::type_enum(city_patterns$city, "City name"),
+    trend = ellmer::type_string(
+      "Concise description of the multi-decade rainfall shape; at most 12 words"
+    )
+  ),
+  description = "Exactly one trend description for each of the nine cities"
+) -> city_trend_type
+
+trend_chat <- ellmer::chat_openai(model = "gpt-5.6-luna")
+
+trend_chat$chat_structured(
+  trend_prompt,
+  type = city_trend_type
+) %>%
+  mutate(city = as.character(city)) -> city_trends
+
+stopifnot(
+  nrow(city_trends) == nrow(city_patterns),
+  setequal(city_trends$city, city_patterns$city)
+)
+
+city_yearly %>%
+  summarise(avg_mm = mean(annual_mm), .by = city) %>%
+  mutate(city = as.character(city)) %>%
+  left_join(city_trends, by = "city") %>%
+  arrange(match(city, city_patterns$city)) %>%
+  mutate(
+    facet_label = paste0(
+      city,
+      " · avg ",
+      scales::comma(round(avg_mm)),
+      " mm/year\n",
+      stringr::str_wrap(trend, width = 100)
+    ),
+    facet_label = factor(facet_label, levels = facet_label)
+  ) -> city_stats
+
+city_yearly %>%
+  mutate(city = as.character(city)) %>%
+  left_join(city_stats, by = "city") -> city_yearly_plot
+
+city_yearly_plot %>%
+  group_by(city, facet_label) %>%
+  filter(annual_mm %in% range(annual_mm)) %>%
+  mutate(
+    note = if_else(annual_mm == max(annual_mm), "Wettest", "Driest"),
+    label = paste0(
+      note,
+      "\n",
+      year,
+      " · ",
+      scales::comma(round(annual_mm)),
+      " mm"
+    )
+  ) %>%
+  ungroup() -> city_extremes
+
+city_yearly_plot %>%
+  ggplot(aes(year, annual_mm)) +
+  geom_line(colour = "grey75", linewidth = 0.65) +
+  geom_point(colour = "grey40", size = 1.1) +
+  geom_smooth(se = FALSE, colour = "#1b7a7a", linewidth = 1.2) +
+  geom_point(data = city_extremes, colour = "#1b7a7a", size = 2.6) +
+  geom_text(
+    data = city_extremes,
+    aes(label = label, vjust = if_else(note == "Wettest", -0.7, 1.5)),
+    colour = "#1b7a7a",
+    fontface = "bold",
+    size = 3.3,
+    lineheight = 1,
+    show.legend = FALSE
+  ) +
+  facet_wrap(vars(facet_label), ncol = 3, scales = "free_y") +
+  scale_y_continuous(
+    labels = scales::label_comma(),
+    expand = expansion(mult = c(0.12, 0.18))
+  ) +
+  labs(
+    title = "Annual rainfall across nine major Indian cities",
+    subtitle = stringr::str_wrap(
+      "Panel headings show the 1901–2025 average and an LLM reading of the trend; scales vary by city",
+      width = 130
+    ),
+    x = NULL,
+    y = "annual rainfall (mm)"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    panel.grid.minor = element_blank(),
+    panel.grid.major = element_line(colour = "grey85", linewidth = 0.35),
+    panel.spacing = unit(1.2, "lines"),
+    plot.title = element_text(size = 20, face = "bold"),
+    plot.subtitle = element_text(
+      size = 12,
+      lineheight = 1.1,
+      margin = margin(t = 5, b = 14)
+    ),
+    axis.text = element_text(size = 10.5, colour = "grey20"),
+    axis.title.y = element_text(size = 12, face = "bold"),
+    strip.text = element_text(
+      size = 12,
+      face = "bold",
+      lineheight = 1,
+      hjust = 0,
+      margin = margin(y = 8)
+    )
+  )
+```
+
+## City rainfall since 1951
+
+Repeat the nine-city comparison for post-1950 data only. Five-year periods now
+begin in 1951, so the trend summaries and panel averages use 1951–2025 throughout.
+
+```{r, fig.width=14, fig.height=12, out.width='100%'}
+city_yearly %>%
+  filter(year > 1950) -> city_yearly_post1950
+
+city_yearly_post1950 %>%
+  mutate(period_start = 1951 + 5 * ((year - 1951) %/% 5)) %>%
+  summarise(
+    mean_mm = round(mean(annual_mm)),
+    .by = c(city, period_start)
+  ) %>%
+  arrange(city, period_start) -> city_trend_input_post1950
+
+paste(
+  "Describe the post-1950 rainfall shape for each Indian city below.",
+  "The values are five-year means of annual rainfall in millimetres for 1951–2025.",
+  "Focus on multi-decade rises, falls, plateaus, reversals, and recent direction.",
+  "Do not reduce the series to one slope. Do not claim significance or causation.",
+  "Write one plain-English sentence per city, at most 12 words.",
+  paste(
+    capture.output(write.csv(city_trend_input_post1950, row.names = FALSE)),
+    collapse = "\n"
+  ),
+  sep = "\n"
+) -> trend_prompt_post1950
+
+trend_chat$chat_structured(
+  trend_prompt_post1950,
+  type = city_trend_type
+) %>%
+  mutate(city = as.character(city)) -> city_trends_post1950
+
+stopifnot(
+  nrow(city_trends_post1950) == nrow(city_patterns),
+  setequal(city_trends_post1950$city, city_patterns$city)
+)
+
+city_yearly_post1950 %>%
+  summarise(avg_mm = mean(annual_mm), .by = city) %>%
+  mutate(city = as.character(city)) %>%
+  left_join(city_trends_post1950, by = "city") %>%
+  arrange(match(city, city_patterns$city)) %>%
+  mutate(
+    facet_label = paste0(
+      city,
+      " · avg ",
+      scales::comma(round(avg_mm)),
+      " mm/year\n",
+      stringr::str_wrap(trend, width = 100)
+    ),
+    facet_label = factor(facet_label, levels = facet_label)
+  ) -> city_stats_post1950
+
+city_yearly_post1950 %>%
+  mutate(city = as.character(city)) %>%
+  left_join(city_stats_post1950, by = "city") -> city_yearly_plot_post1950
+
+city_yearly_plot_post1950 %>%
+  group_by(city, facet_label) %>%
+  filter(annual_mm %in% range(annual_mm)) %>%
+  mutate(
+    note = if_else(annual_mm == max(annual_mm), "Wettest", "Driest"),
+    label = paste0(
+      note,
+      "\n",
+      year,
+      " · ",
+      scales::comma(round(annual_mm)),
+      " mm"
+    )
+  ) %>%
+  ungroup() -> city_extremes_post1950
+
+city_yearly_plot_post1950 %>%
+  ggplot(aes(year, annual_mm)) +
+  geom_line(colour = "grey75", linewidth = 0.65) +
+  geom_point(colour = "grey40", size = 1.1) +
+  geom_smooth(se = FALSE, colour = "#1b7a7a", linewidth = 1.2) +
+  geom_point(data = city_extremes_post1950, colour = "#1b7a7a", size = 2.6) +
+  geom_text(
+    data = city_extremes_post1950,
+    aes(label = label, vjust = if_else(note == "Wettest", -0.7, 1.5)),
+    colour = "#1b7a7a",
+    fontface = "bold",
+    size = 3.3,
+    lineheight = 1,
+    show.legend = FALSE
+  ) +
+  facet_wrap(vars(facet_label), ncol = 3, scales = "free_y") +
+  scale_y_continuous(
+    labels = scales::label_comma(),
+    expand = expansion(mult = c(0.12, 0.18))
+  ) +
+  labs(
+    title = "Annual rainfall across nine major Indian cities since 1951",
+    subtitle = stringr::str_wrap(
+      "Panel headings show the 1951–2025 average and an LLM reading of the post-1950 trend; scales vary by city",
+      width = 130
+    ),
+    x = NULL,
+    y = "annual rainfall (mm)"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    panel.grid.minor = element_blank(),
+    panel.grid.major = element_line(colour = "grey85", linewidth = 0.35),
+    panel.spacing = unit(1.2, "lines"),
+    plot.title = element_text(size = 20, face = "bold"),
+    plot.subtitle = element_text(
+      size = 12,
+      lineheight = 1.1,
+      margin = margin(t = 5, b = 14)
+    ),
+    axis.text = element_text(size = 10.5, colour = "grey20"),
+    axis.title.y = element_text(size = 12, face = "bold"),
+    strip.text = element_text(
+      size = 12,
+      face = "bold",
+      lineheight = 1,
+      hjust = 0,
+      margin = margin(y = 8)
+    )
+  )
+```
