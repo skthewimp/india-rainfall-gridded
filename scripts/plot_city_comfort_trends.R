@@ -93,6 +93,17 @@ print(trend_ends %>% select(city, year, trend))
 city_years %>%
   ggplot(aes(year, comfortable)) +
   geom_point(colour = "grey70", size = 0.8) +
+  # City name inside its own boxed panel, so it can't be read as belonging
+  # to the panel above.
+  geom_text(
+    data = cities %>% mutate(city = factor(city, levels = city)),
+    aes(x = 1939, y = Inf, label = city),
+    hjust = 0,
+    vjust = 1.6,
+    fontface = "bold",
+    size = 3.6,
+    colour = "grey15"
+  ) +
   geom_line(aes(y = trend), colour = teal, linewidth = 0.9) +
   geom_point(data = trend_ends, aes(y = trend), colour = teal, size = 1.6) +
   geom_text(
@@ -105,9 +116,14 @@ city_years %>%
   facet_wrap(vars(city), ncol = 4) +
   scale_x_continuous(
     breaks = c(1960, 1990, 2020),
-    expand = expansion(mult = 0.2)
+    # Fixed limits leave room for the end labels and the city name.
+    limits = c(1936, 2037),
+    expand = expansion(0)
   ) +
-  scale_y_continuous(breaks = seq(0, 300, 100)) +
+  scale_y_continuous(
+    breaks = seq(0, 200, 100),
+    limits = c(0, 300)
+  ) +
   coord_cartesian(clip = "off") +
   labs(
     title = "Bengaluru, Chennai and Hyderabad have lost a third or more of their comfortable days",
@@ -133,13 +149,13 @@ city_years %>%
     plot.title = element_text(face = "bold", size = 14),
     plot.subtitle = element_text(colour = "grey35", margin = margin(b = 10)),
     plot.caption = element_text(colour = "grey45", hjust = 0, size = 7.5, lineheight = 1.1),
-    strip.text = element_text(face = "bold", hjust = 0, size = 10),
+    strip.text = element_blank(),
+    panel.border = element_rect(colour = "grey75", fill = NA, linewidth = 0.4),
     panel.grid.minor = element_blank(),
     panel.grid.major.x = element_blank(),
     panel.grid.major.y = element_line(colour = "grey92", linewidth = 0.3),
     axis.text = element_text(colour = "grey45", size = 8),
-    panel.spacing.x = unit(14, "pt"),
-    panel.spacing.y = unit(10, "pt"),
+    panel.spacing = unit(6, "pt"),
     plot.margin = margin(14, 16, 10, 14)
   )
 
