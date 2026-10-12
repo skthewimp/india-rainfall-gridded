@@ -183,6 +183,7 @@ bash scripts/fetch_kaveri_geography.sh
 Rscript scripts/build_comfortable_days.R   # ~2 min, writes the daily flags
 Rscript scripts/map_comfortable_days.R     # the two maps
 Rscript scripts/plot_city_comfort_trends.R # the 12-city panels
+Rscript scripts/plot_city_comfort_seasons.R # when in the year, same cities
 ```
 
 The rule was chosen to be India-specific. The US-style definition the idea came
@@ -205,16 +206,23 @@ geoBoundaries), dropping cells missing more than 10% of days in a period.
 `scripts/plot_city_comfort_trends.R` plots yearly counts with a loess trend for
 the largest cities (Census 2011 urban agglomerations; Nagpur replaces Lucknow,
 which shares Kanpur's 1° temperature cell).
+`scripts/plot_city_comfort_seasons.R` shows when in the year those days fall:
+for each day (Feb 29 dropped), the share of years it was comfortable in
+1951-1980 and 1995-2024, smoothed over 15 days, so the gap between the lines
+shows which weeks gained or lost.
 
 | Chart | Hard rule | Fuzzy score |
 |---|---|---|
 | Average, 1995-2024 | `outputs/comfortable_days_map.png` | `outputs/comfortable_days_map_fuzzy.png` |
 | Change since 1951-1980 | `outputs/comfortable_days_change_map.png` | `outputs/comfortable_days_change_map_fuzzy.png` |
 | City trends | `outputs/city_comfortable_days.png` | `outputs/city_comfortable_days_fuzzy.png` |
+| City seasons | `outputs/city_comfort_seasons.png` | `outputs/city_comfort_seasons_fuzzy.png` |
 
 ![Change in comfortable days, 1995-2024 vs 1951-1980](outputs/comfortable_days_change_map.png)
 
 ![Comfortable days a year in the largest cities, 1951-2024](outputs/city_comfortable_days.png)
+
+![When in the year comfortable days fall, 1951-80 vs 1995-2024](outputs/city_comfort_seasons.png)
 
 ### Fuzzy comfort score
 
@@ -229,6 +237,7 @@ comfortable days (`comfort_score_days` in the annual table, over
 ```bash
 Rscript scripts/map_comfortable_days.R fuzzy
 Rscript scripts/plot_city_comfort_trends.R fuzzy
+Rscript scripts/plot_city_comfort_seasons.R fuzzy
 ```
 
 These write the same charts with a `_fuzzy` suffix.

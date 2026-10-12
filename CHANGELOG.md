@@ -3,6 +3,9 @@
 ## 2026-10-12
 
 ### Added
+- `scripts/plot_city_comfort_seasons.R`: for the same 12 cities, the chance each
+  day of the year is comfortable, 1951-80 vs 1995-2024, with the gap shaded.
+  Takes the `fuzzy` argument too.
 - Fuzzy comfort score: each cell-day gets `comfort_score` between 0 and 1, the
   product of logistic curves centred on the hard thresholds. The annual table
   gains `comfort_score_days` and `score_observed_days`.
