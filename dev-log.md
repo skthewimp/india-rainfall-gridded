@@ -329,3 +329,4 @@ Built with Claude Code. Charts in `outputs/`, write-up in
 - Both season charts (`outputs/city_comfort_seasons.png` and `_fuzzy.png`) now have a faint vertical gridline at the start of every month. The axis still labels only Jan, Apr, Jul and Oct. Re-rendered and checked the im...
 
 <!-- claude-session:42f6bc8f-dbd2-4cf6-ab30-caad775e8e68:end -->
+
